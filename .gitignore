@@ -1,0 +1,30 @@
+# Blender files
+*.blend
+*.blend1
+
+# Image files
+*.png
+*.jpg
+*.jpeg
+*.tif
+*.tiff
+*.exr
+
+# Output directories
+assets/
+facades/
+mapbox/
+misc/
+models/
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Temporary files
+*.tmp
+*.log
