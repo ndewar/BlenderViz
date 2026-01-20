@@ -9,6 +9,8 @@
 *.tif
 *.tiff
 *.exr
+*.mtl
+*.obj
 
 # Output directories
 assets/
