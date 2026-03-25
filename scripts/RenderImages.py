@@ -8,12 +8,13 @@ siteNum = globals().get('siteNum', 1)
 versionNum = globals().get('versionNum', 1)
 state = globals().get('state', 'florida')
 county = globals().get('county', 'brevard')
+update_flag = globals().get('update_flag', True)
 
-# 1. Get the imported raster names from importRasters.py
-imported_rasters = globals().get('imported_rasters', [])
+# 1. Get the existing object names from the scene
+existing_object_names = set(bpy.data.objects.keys())
 
 # Filter for flood maps only (exclude DEM)
-flood_rasters = [name for name in imported_rasters if 'floodmap' in name.lower()]
+flood_rasters = [name for name in existing_object_names if 'floodmap' in name.lower()]
 
 # Add noFlood at the beginning for a render with no flood layers visible
 collection_names = ['noFlood'] + flood_rasters
@@ -58,39 +59,49 @@ def setup_render_settings():
 
 def toggle_object_visibility(target_object_name):
     """Hides all specified flood objects and makes only the target one visible."""
-    # Hide all flood rasters
+    
+    # Hide all flood rasters first
     for name in collection_names:
         if name != 'noFlood':  # Skip the noFlood placeholder
             obj = bpy.data.objects.get(name)
             if obj:
                 obj.hide_render = True
+                obj.hide_viewport = True
 
-    # If target is noFlood, leave all flood rasters hidden
-    if target_object_name == 'noFlood':
-        print("No flood rasters visible (noFlood render)")
-        return
-        
-    # Otherwise, show the target flood raster
-    target_obj = bpy.data.objects.get(target_object_name)
-    if target_obj:
-        target_obj.hide_render = False
-        print(f"Made visible: {target_object_name}")
-    else:
-        print(f"Warning: Object '{target_object_name}' not found")
+    # Show the target flood object if it's not noFlood
+    if target_object_name != 'noFlood':
+        target_obj = bpy.data.objects.get(target_object_name)
+        if target_obj:
+            target_obj.hide_render = False
+            target_obj.hide_viewport = False
 
-def render_and_save(collection_name, camera_name):
+    # Always ensure DEM and buildings are visible
+    for obj in bpy.data.objects:
+        if obj.type == 'MESH':
+            if "dem" in obj.name.lower():
+                obj.hide_render = False
+                obj.hide_viewport = False
+            elif "building" in obj.name.lower():
+                obj.hide_render = False
+                obj.hide_viewport = False
+
+def render_and_save(collection_name, camera_name, update_flag = True):
     """Sets the active camera, renders, and saves the image."""
     # Set the active camera
     camera = bpy.data.objects.get(camera_name)
     if not camera or camera.type != 'CAMERA':
         print(f"Warning: Camera '{camera_name}' not found or is not a camera.")
-        return None  # Return None for failed renders
+        return None
 
     bpy.context.scene.camera = camera
 
     # Construct the output filename
     filename = f"{collection_name}_{camera_name}_v{versionNum}.{image_format.lower()}"
     filepath = os.path.join(output_directory + f'/{camera_name}', filename)
+    if os.path.exists(filepath) and not update_flag:
+        print(f"Skipping render: {filepath} already exists")
+        return filename
+    
     bpy.context.scene.render.filepath = filepath
     os.makedirs(output_directory + f'/{camera_name}',exist_ok = True)
     
@@ -106,9 +117,7 @@ def render_and_save(collection_name, camera_name):
     
 def set_active_camera(camera_name):
     camera = bpy.data.objects.get(camera_name)
-    print(bpy.context.scene.camera)
     bpy.context.scene.camera = camera
-    print(bpy.context.scene.camera)
     
 # Ranking functions
 def flood_rank(name):
@@ -143,27 +152,48 @@ for collection_name in collection_names:
 
     # Loop through each camera for the current collection
     for camera_name in camera_names:
-        currFilename = render_and_save(collection_name, camera_name)
+        currFilename = render_and_save(collection_name, camera_name, update_flag)
         if currFilename:  # Only append successful renders
             filenames.append(currFilename)
+
+# list all potential scenario tags
+# TODO: get this from the project config
+potentialScenarios = ['High','Low','USACE','NOAA']
 
 # sort and filter the files
 for camera_name in camera_names:
     currFiles = [x for x in filenames if camera_name in x]
-    
-    # Sort by view first, then by flood severity
-    sorted_files = sorted(currFiles, key=lambda x: (view_rank(x), flood_rank(x)))
-    
-    # save the files
-    with open(f"{output_directory}/list.txt", "w") as f:
-        for file in sorted_files:
-            f.write(f"file '{output_directory}/{camera_name}/{file}'\n")
-            f.write('duration 2.0\n')
-    
-    # run ffmpeg
-    commandStr = f'ffmpeg -y -f concat -safe 0 -i {output_directory}/list.txt -filter_complex "[0:v]fps=3,split[v1][v2];[v1]palettegen[p];[v2][p]paletteuse" {output_directory}/{camera_name}/animation.gif'
-    os.system(commandStr)
-    
+    no_flood_file = [x for x in currFiles if 'noFlood' in x][0]
+
+    scenarios = {}
+    for filename in currFiles:
+        for tag in potentialScenarios:
+            if tag in filename:
+                if tag not in scenarios:
+                    scenarios[tag] = []
+                scenarios[tag].append(filename)
+
+    # now make an animation for each scenario
+    for curr_scenario in scenarios.keys():
+
+        # Sort by year first, then flood severity
+        sorted_files = sorted(scenarios[curr_scenario], key=lambda x: (x.split('_')[1], flood_rank(x)))
+        newList = [no_flood_file]
+        newList.extend(sorted_files)
+
+        # save the files with camera-specific list file
+        list_file_path = f"{output_directory}/{camera_name}/list.txt"
+        with open(list_file_path, "w") as f:
+            for file in newList:
+                f.write(f"file '{output_directory}/{camera_name}/{file}'\n")
+                f.write('duration 2.0\n')
+        
+        # run ffmpeg with camera-specific list file
+        commandStr = f'ffmpeg -y -f concat -safe 0 -i {list_file_path} -filter_complex "[0:v]fps=3,split[v1][v2];[v1]palettegen[p];[v2][p]paletteuse" {output_directory}/{camera_name}/{curr_scenario}_animation.gif'
+        os.system(commandStr)    
+
+        # remove the list.txt file
+        os.remove(list_file_path)
 
 print("\n--- Automated Render Finished ---")
 

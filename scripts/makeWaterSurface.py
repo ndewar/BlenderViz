@@ -32,7 +32,7 @@ def create_complex_material(material_name="GeneratedComplexMaterial"):
     # --- Surface Shaders ---
     mix_shader = nodes.new(type='ShaderNodeMixShader')
     mix_shader.location = (200, 0)
-    mix_shader.inputs[0].default_value = 0.1 # Factor from log
+    mix_shader.inputs[0].default_value = 0.5 # Factor from log
 
     mix_shader_2 = nodes.new(type='ShaderNodeMixShader')
     mix_shader_2.location = (0, 100)
@@ -54,7 +54,7 @@ def create_complex_material(material_name="GeneratedComplexMaterial"):
 
     volume_scatter = nodes.new(type='ShaderNodeVolumeScatter')
     volume_scatter.location = (0, -300)
-    volume_scatter.inputs['Density'].default_value = 0.2
+    volume_scatter.inputs['Density'].default_value = 1.0
     #volume_scatter.inputs['Backscatter'].default_value = -0.2
     volume_scatter.inputs['Color'].default_value = (0.294, 0.345, 0.259, 1.0)  # Murky green #4B5842FF
     volume_scatter.phase = 'FOURNIER_FORAND'
@@ -65,7 +65,7 @@ def create_complex_material(material_name="GeneratedComplexMaterial"):
 
     volume_absorption = nodes.new(type='ShaderNodeVolumeAbsorption')
     volume_absorption.location = (0, -500)
-    volume_absorption.inputs['Density'].default_value = 0.2
+    volume_absorption.inputs['Density'].default_value = 2.0
     volume_absorption.inputs['Color'].default_value = (0.275, 0.557, 0.631, 1.0)  # Light blue #468EA1FF
 
     # --- Control & Texture Nodes ---
@@ -78,7 +78,7 @@ def create_complex_material(material_name="GeneratedComplexMaterial"):
 
     bump_node = nodes.new(type='ShaderNodeBump')
     bump_node.location = (-400, 100)
-    bump_node.inputs['Strength'].default_value = 1  # Increase bump strength
+    bump_node.inputs['Strength'].default_value = 2  # Increase bump strength
 
     gabor_texture = nodes.new(type='ShaderNodeTexGabor')
     gabor_texture.location = (-600, 100)

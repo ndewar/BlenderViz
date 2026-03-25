@@ -247,52 +247,6 @@ def safe_clean_scene():
             block.remove(item)
 
 
-def complete_blender_reset():
-    """Completely resets Blender to a clean state - more thorough than safe_clean_scene."""
-    
-    # 1. Clear all objects
-    bpy.ops.object.select_all(action='SELECT')
-    bpy.ops.object.delete()
-    
-    # 2. Clear all data blocks
-    for collection in [
-        bpy.data.meshes,
-        bpy.data.materials, 
-        bpy.data.textures,
-        bpy.data.images,
-        bpy.data.cameras,
-        bpy.data.lights,
-        bpy.data.curves,
-        bpy.data.metaballs,
-        bpy.data.volumes,
-        bpy.data.grease_pencils,
-        bpy.data.armatures,
-        bpy.data.lattices,
-        bpy.data.speakers,
-        bpy.data.lightprobes
-    ]:
-        for item in list(collection):
-            collection.remove(item)
-    
-    # 3. Clear collections
-    for collection in list(bpy.data.collections):
-        bpy.data.collections.remove(collection)
-    
-    # 4. Reset scene settings
-    scene = bpy.context.scene
-    scene.use_nodes = False
-    
-    # 5. Clear node trees
-    for node_tree in list(bpy.data.node_groups):
-        bpy.data.node_groups.remove(node_tree)
-    
-    # 6. Reset world
-    if bpy.context.scene.world:
-        bpy.data.worlds.remove(bpy.context.scene.world)
-    
-    print("Blender completely reset to clean state")
-
-
 def apply_render_settings(scene):
     # 1. Set Render Engine to Cycles
     scene.render.engine = 'CYCLES'
@@ -356,6 +310,7 @@ def run_pipeline():
         print(f"\n\nRunning site {site_num_val}")
         center_lat_long = data['sites'][county_val][f'site{site_num_val}']['center_lat_long']
         worldLightingRotationAngle = data['sites'][county_val][f'site{site_num_val}']['worldLightingRotationAngle']
+        world_lighting_strength = data['sites'][county_val][f'site{site_num_val}'].get('world_lighting_strength', 1.0)
         renderVersionNumber = data['sites'][county_val][f'site{site_num_val}']['renderVersionNumber']
         
         # 1.2 set the georeference
@@ -367,14 +322,32 @@ def run_pipeline():
 
         # 2. Define script directory and files
         script_dir = "/Users/noahdewar/Documents/HighTide/BlenderViz/scripts/"
-        scripts_to_run = [
-            "importRasters.py",
-            "addSatImage.py",
-            "addWorldLighting.py",
-            "makeWaterSurface.py",
-            "setUpCompositing.py",
-            "addBuildings.py"
-        ]
+
+        # Check if ESRI multipatch path is specified in config
+        site_config = data['sites'][county_val][f'site{site_num_val}']
+        esri_multipatch_path = site_config.get('ESRI_multi_patch_path', None)
+
+        # Build script list - exclude addBuildings.py if using multipatch
+        if esri_multipatch_path:
+            print(f"Found ESRI_multi_patch_path: {esri_multipatch_path}")
+            print("Will use multipatch import instead of regular building import")
+            scripts_to_run = [
+                "importRasters.py",
+                "addSatImage.py",
+                "addWorldLighting.py",
+                "makeWaterSurface.py",
+                "setUpCompositing.py",
+                # addBuildings.py excluded - will run importMultipatch.py instead
+            ]
+        else:
+            scripts_to_run = [
+                "importRasters.py",
+                "addSatImage.py",
+                "addWorldLighting.py",
+                "makeWaterSurface.py",
+                "setUpCompositing.py",
+                "addBuildings.py"
+            ]
 
         # 3. Create the 'Global Scope' dictionary to pass variables
         # These variables will be accessible inside the sub-scripts
@@ -386,7 +359,9 @@ def run_pipeline():
             'siteNum': site_num_val,
             'versionNum': renderVersionNumber,
             'zoom': 18,
-            'worldLightingRotationAngle':worldLightingRotationAngle
+            'worldLightingRotationAngle': worldLightingRotationAngle,
+            'world_lighting_strength': world_lighting_strength,
+            'restrict_import': True
         }
 
         # 3.1, clear the scene
@@ -395,7 +370,7 @@ def run_pipeline():
         # 4. Run the scripts in order
         for script_name in scripts_to_run:
             script_path = os.path.join(script_dir, script_name)
-            
+
             if os.path.exists(script_path):
                 print(f"\n\n--- Running: {script_name} ---")
                 with open(script_path, 'r') as f:
@@ -403,6 +378,27 @@ def run_pipeline():
                     exec(f.read(), shared_context)
             else:
                 print(f"SKIPPING: {script_name} not found at {script_path}")
+
+        # 4.0.1 Run multipatch import if ESRI path is specified
+        if esri_multipatch_path:
+            print(f"\n\n--- Running: importMultipatch.py ---")
+            multipatch_script_path = os.path.join(script_dir, "importMultipatch.py")
+            if os.path.exists(multipatch_script_path):
+                # Add multipatch-specific variables to shared context
+                shared_context['multipatch_folder'] = esri_multipatch_path
+                shared_context['filter_by_dem'] = site_config.get('multipatch_filter_by_dem', True)
+                shared_context['bounds_buffer_meters'] = site_config.get('multipatch_buffer_meters', 50)
+                shared_context['run_import'] = True
+
+                # Position offset correction (if buildings appear offset)
+                shared_context['multipatch_offset_x'] = site_config.get('multipatch_offset_x', 0.0)
+                shared_context['multipatch_offset_y'] = site_config.get('multipatch_offset_y', 0.0)
+                shared_context['multipatch_offset_z'] = site_config.get('multipatch_offset_z', 0.0)
+
+                with open(multipatch_script_path, 'r') as f:
+                    exec(f.read(), shared_context)
+            else:
+                print(f"ERROR: importMultipatch.py not found at {multipatch_script_path}")
 
         # 4.1 set the render and viewport settings
         scene = bpy.context.scene
@@ -421,6 +417,12 @@ def run_pipeline():
             camera_height_offset=50.0  # Add 50m above calculated position
         )
 
+        # 5. Save the final result
+        output_name = f"{county_val}_site{site_num_val}.blend"
+        output_path = os.path.join(f"/Users/noahdewar/Documents/HighTide/data/{state}/counties/{county_val}/blender/site{site_num_val}/", output_name)
+        bpy.ops.wm.save_as_mainfile(filepath=output_path)
+        print(f"Done! Project saved to: {output_path}")
+
         # 4.3 Run RenderImages after cameras are set up
         render_script_path = os.path.join(script_dir, "RenderImages.py")
         if os.path.exists(render_script_path):
@@ -436,10 +438,194 @@ def run_pipeline():
         bpy.ops.wm.save_as_mainfile(filepath=output_path)
         print(f"Done! Project saved to: {output_path}")
 
-        # 6. Complete reset for next site (if not the last one)
+        # 6. Reset for next site (if not the last one)
         if site_num_val != sitesToRun[-1]:
-            complete_blender_reset()
-            print(f"Blender reset for next site")
+            # Clear all objects
+            bpy.ops.object.select_all(action='SELECT')
+            bpy.ops.object.delete()
+            
+            # Clear all data blocks
+            for collection in [
+                bpy.data.meshes,        # This clears UV maps too
+                bpy.data.materials, 
+                bpy.data.textures,
+                bpy.data.images,
+                bpy.data.cameras,
+                bpy.data.lights
+            ]:
+                for item in list(collection):
+                    collection.remove(item)
+            
+            print(f"Cleared all objects, materials, UV maps, and cameras for next site")
+
+
+def get_existing_flood_rasters(state, county, site_num, restrict_import):
+    """
+    Returns set of raster object names already in the scene by checking
+    against the actual .tif files that would be imported, using the same
+    filter logic as importRasters.py.
+    """
+    folder_path = f'/Users/noahdewar/Documents/HighTide/data/{state}/counties/{county}/blender/site{site_num}/'
+    existing_objects = set(bpy.data.objects.keys())
+    present = set()
+    missing = set()
+
+    if not os.path.exists(folder_path):
+        print(f"Warning: folder not found: {folder_path}")
+        return present, missing
+
+    for file_name in os.listdir(folder_path):
+        if not file_name.lower().endswith('.tif'):
+            continue
+        if restrict_import:
+            if 'floodmap' in file_name.lower():
+                if not ('_c1_' in file_name.lower() and '_high_' in file_name.lower()):
+                    continue  # same filter as importRasters.py
+
+        object_name = file_name.replace('.tif', '')
+        if object_name in existing_objects:
+            present.add(object_name)
+        else:
+            missing.add(object_name)
+
+    return present, missing
+
+
+def run_pipeline_existing(
+    state, county_val, site_num_val, project_name
+):
+    """
+    Load an existing .blend, add only missing flood rasters, render, save.
+    
+    Parameters
+    ----------
+    expected_flood_raster_names : list[str]
+        The object names that importRasters.py would normally create.
+        e.g. ['flood_slr_1ft', 'flood_slr_2ft', 'flood_100yr']
+    """
+
+    # 1. Load existing .blend file
+    blend_path = os.path.join(
+        f"/Users/noahdewar/Documents/HighTide/data/{state}/counties/{county_val}/blender/site{site_num_val}/",
+        f"{county_val}_site{site_num_val}.blend"
+    )
+
+    if not os.path.exists(blend_path):
+        print(f"ERROR: No existing .blend found at {blend_path}")
+        return
+
+    print(f"Loading existing .blend: {blend_path}")
+    bpy.ops.wm.open_mainfile(filepath=blend_path)
+
+    # 2. Load config
+    json_path = f"/Users/noahdewar/Documents/HighTide/HighTideEngine/data/projects/{project_name}/blender_config.json"
+    with open(json_path, 'r') as f:
+        data = json.load(f)
+
+    site_config = data['sites'][county_val][f'site{site_num_val}']
+    center_lat_long = site_config['center_lat_long']
+    worldLightingRotationAngle = site_config['worldLightingRotationAngle']
+    world_lighting_strength = site_config.get('world_lighting_strength', 1.0)
+    renderVersionNumber = site_config['renderVersionNumber']
+
+    # Re-apply georeference (needed for any projection math)
+    set_georeference(
+        epsg=3857,
+        lat_origin=center_lat_long[0],
+        lon_origin=center_lat_long[1]
+    )
+
+    script_dir = "/Users/noahdewar/Documents/HighTide/BlenderViz/scripts/"
+    shared_context = {
+            'bpy': bpy,
+            'os': os,
+            'state': state,
+            'county': county_val,
+            'siteNum': site_num_val,
+            'versionNum': renderVersionNumber,
+            'zoom': 18,
+            'worldLightingRotationAngle': worldLightingRotationAngle,
+            'world_lighting_strength': world_lighting_strength,
+            'restrict_import': False,
+            'update_flag': False
+        }
+
+    # 3. Run import rasters if rasters are missing
+    present, missing = get_existing_flood_rasters(state, county_val, site_num_val, shared_context['restrict_import'])
+    print(f"Rasters already in scene: {present}")
+    print(f"Rasters to import:        {missing}")
+
+    if missing:
+        print("--- Importing missing rasters ---")
+        # importRasters.py will self-filter using existing_object_names
+        raster_script = os.path.join(script_dir, "importRasters.py")
+        with open(raster_script, 'r') as f:
+            exec(f.read(), shared_context)
+    else:
+        print("All rasters present — skipping import.")
+
+    # 3.5 After importing missing rasters, assign existing material
+    assign_material_script = os.path.join(script_dir, "assignWaterSurface.py")
+    if os.path.exists(assign_material_script):
+        print("--- Assigning flood material to new rasters ---")
+        with open(assign_material_script, 'r') as f:
+            exec(f.read(), shared_context)
+    else:
+        print("SKIPPING: assignWaterSurface.py not found")
+
+    # 4. Re-apply render settings and viewport clipping
+    apply_render_settings(bpy.context.scene)
+    set_viewport_clipping()
+
+    # 5. Ensure cameras exist (re-create if .blend was missing them)
+    for cam_name, url_key in [('Camera1', 'google_url_view1'), ('Camera2', 'google_url_view2')]:
+        if cam_name not in bpy.data.objects:
+            print(f"Camera {cam_name} missing — re-creating from URL")
+            camera_from_google_maps_url_lookat(
+                site_config[url_key],
+                cam_name,
+                camera_height_offset=50.0
+            )
+        else:
+            print(f"Camera {cam_name} already exists — skipping")
+
+    # 6. Render all cameras
+    render_script_path = os.path.join(script_dir, "RenderImages.py")
+    if os.path.exists(render_script_path):
+        print("--- Running: RenderImages.py ---")
+        with open(render_script_path, 'r') as f:
+            exec(f.read(), shared_context)
+    else:
+        print(f"SKIPPING: RenderImages.py not found at {render_script_path}")
+
+    # 7. Save
+    print(f"Saving .blend to: {blend_path}")
+    bpy.ops.wm.save_as_mainfile(filepath=blend_path)
+    print("Done!")
+
+
+def run_pipeline_dispatcher():
+    """
+    CLI usage:
+      New pipeline:      blender -b -P run_pipeline.py -- florida brevard 1 MyProject
+      Existing pipeline: blender -b -P run_pipeline.py -- florida brevard 1 MyProject --existing
+    """
+    try:
+        args = sys.argv[sys.argv.index("--") + 1:]
+        state = args[0]
+        county_val = args[1]
+        site_num_val = args[2]
+        project_name = args[3]
+    except (IndexError, ValueError):
+        print("Error: Provide state, county, site, project. Optionally add --existing")
+        return
+
+    if '--existing' in args:
+        sites = [int(x) for x in site_num_val.split(',')] if ',' in site_num_val else [int(site_num_val)]
+        for site in sites:
+            run_pipeline_existing(state, county_val, site, project_name)
+    else:
+        run_pipeline()  # original flow
 
 if __name__ == "__main__":
-    run_pipeline()
+    run_pipeline_dispatcher()
