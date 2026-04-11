@@ -8,7 +8,8 @@ import bmesh
 material_name = "SatelliteOverlay"
 county = globals().get('county', 'brevard')
 siteNum = globals().get('siteNum', 1)
-zoom = 18
+zoom = globals().get('sat_image_zoom', 18)
+
 image_path = f"/Users/noahdewar/Documents/HighTide/BlenderViz/mapbox/{county}Site{siteNum}_satimage_{zoom}.png"
 uv_map_name = "UVMap"
 
@@ -38,6 +39,8 @@ if obj:
     if os.path.exists(image_path):
         img = bpy.data.images.load(image_path)
         node_tex.image = img
+    else:
+        raise Exception(f'No image found at {image_path}')
     
     # 4. Linking
     links.new(node_uv.outputs['UV'], node_mapping.inputs['Vector'])

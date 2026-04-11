@@ -28,6 +28,7 @@ if os.path.exists(folder_path):
             full_path = os.path.join(folder_path, file_name)
 
             # only import C1 High or Low floodmaps
+            # for now, only import floodmap_2070_High_C1_site4_3857 as its the one we are using for the flyover
             if restrict_import:
                 if 'floodmap' in file_name.lower():
                     has_c1 = '_c1_' in file_name.lower()
@@ -36,6 +37,10 @@ if os.path.exists(folder_path):
                     
                     if not (has_c1 and (has_high or has_low)):
                         print(f"Skipping {file_name} - missing C1 or HIGH or LOW")
+                        continue
+
+                    if not '2070_high_c1' in file_name.lower():
+                        print(f"Skipping {file_name} - only import floodmap_2070_High_C1_site4_3857 for the flyover")
                         continue
             
             # if raster is already imported, skip import

@@ -106,8 +106,15 @@ def render_and_save(collection_name, camera_name, update_flag = True):
     os.makedirs(output_directory + f'/{camera_name}',exist_ok = True)
     
     # Set the note text
-    bpy.context.scene.render.stamp_note_text = collection_name.replace('yr_',' Year, ').replace('noFlood_','').replace('saturated','Saturated Conditions,').replace('_',' ').replace('site','Site ') + f', Version {versionNum}'
+    bpy.context.scene.render.stamp_note_text = collection_name.replace('yr_',' Year, ').replace('noFlood_','').replace('saturated','Saturated Conditions,').replace('_',' ').replace('site','Site ').replace(' C1 ',' Category 1 ').replace(' 3857','') + f', Version {versionNum}'
 
+    # replace the short scenario names with the full ones
+    bpy.context.scene.render.stamp_note_text = bpy.context.scene.render.stamp_note_text.replace(' NOAA ',' NOAA 2017 Intermediate-High Sea Level Rise Projections + HighTide Flooding and Storm Surge ')
+    bpy.context.scene.render.stamp_note_text = bpy.context.scene.render.stamp_note_text.replace(' High ',' NOAA 2017 High Sea Level Rise Projections + HighTide Flooding and Storm Surge ')
+    bpy.context.scene.render.stamp_note_text = bpy.context.scene.render.stamp_note_text.replace(' Low ',' NOAA 2017 Intermediate-Low Sea Level Rise Projections + HighTide Flooding and Storm Surge ')
+    bpy.context.scene.render.stamp_note_text = bpy.context.scene.render.stamp_note_text.replace(' USACE ',' USACE 2013 High Sea Level Rise Projections + HighTide Flooding and Storm Surge  ')
+    bpy.context.scene.render.stamp_note_text = bpy.context.scene.render.stamp_note_text.replace('noFlood,','Baseline No Flooding Scenario,')
+    
     # Render the image
     print(f"Rendering: Collection '{collection_name}', Camera '{camera_name}'")
     bpy.ops.render.render(write_still=True)

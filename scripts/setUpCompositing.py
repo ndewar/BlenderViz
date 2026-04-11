@@ -44,12 +44,32 @@ def setup_compositing_nodes():
     scale_node_1.inputs[1].default_value = 0.375  # X Scale
     scale_node_1.inputs[2].default_value = 0.375  # Y Scale
 
+    render = bpy.context.scene.render
+    res_x = render.resolution_x * (render.resolution_percentage / 100)
+    res_y = render.resolution_y * (render.resolution_percentage / 100)
+
+    # Logo dimensions
+    logo_source_w = 960
+    logo_source_h = 384
+    logo_scale = 0.375
+
+    logo_w = logo_source_w * logo_scale  # = 360px
+    logo_h = logo_source_h * logo_scale  # = 144px
+
+    # Margin from bottom-right corner
+    margin_x = 20
+    margin_y = 20
+
+    # Absolute pixel position (compositor origin = center of frame)
+    translate_x = (res_x / 2) - (logo_w / 2) - margin_x
+    translate_y = -(res_y / 2) + (logo_h / 2) + margin_y
+
     # Add Translate node
     translate_node = tree.nodes.new(type="CompositorNodeTranslate")
     translate_node.location = (-300, 60)
-    translate_node.inputs[1].default_value = 2.15  # X
-    translate_node.inputs[2].default_value = -3.3   # Y
-    translate_node.use_relative = True # Set translate to relative
+    translate_node.inputs[1].default_value = translate_x
+    translate_node.inputs[2].default_value = translate_y
+    translate_node.use_relative = False  # Absolute pixels
 
     # Add second Scale node
     scale_node_2 = tree.nodes.new(type="CompositorNodeScale")

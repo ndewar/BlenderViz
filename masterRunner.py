@@ -2,6 +2,7 @@ import bpy
 import addon_utils
 import importlib
 import sys
+import time
 
 ADDON = "BlenderGIS"
 
@@ -254,6 +255,9 @@ def apply_render_settings(scene):
     # 2. Set Samples for Render (Image)
     # In modern Blender (3.0+), this is the 'Max Samples'
     scene.cycles.samples = 124
+
+    # this is for faster flyover creation while testing stuff
+    scene.cycles.samples = 32
     
     # 3. Set Noise Threshold (Adaptive Sampling)
     # If you want exactly 124 samples without early stopping, 
@@ -335,7 +339,7 @@ def run_pipeline():
                 "importRasters.py",
                 "addSatImage.py",
                 "addWorldLighting.py",
-                "makeWaterSurface.py",
+                "makeWaterSurfaceV2.py",
                 "setUpCompositing.py",
                 # addBuildings.py excluded - will run importMultipatch.py instead
             ]
@@ -344,10 +348,15 @@ def run_pipeline():
                 "importRasters.py",
                 "addSatImage.py",
                 "addWorldLighting.py",
-                "makeWaterSurface.py",
+                "makeWaterSurfaceV2.py",
                 "setUpCompositing.py",
                 "addBuildings.py"
             ]
+
+
+        # split based on flyover or normal rendering
+        flyover_config = site_config.get('flyover', {})
+        use_flyover = flyover_config.get('enabled', False)
 
         # 3. Create the 'Global Scope' dictionary to pass variables
         # These variables will be accessible inside the sub-scripts
@@ -361,7 +370,9 @@ def run_pipeline():
             'zoom': 18,
             'worldLightingRotationAngle': worldLightingRotationAngle,
             'world_lighting_strength': world_lighting_strength,
-            'restrict_import': True
+            'restrict_import': True,
+            'sat_image_zoom': site_config.get('sat_image_zoom',18),
+            'render_fps': flyover_config.get('fps',24),
         }
 
         # 3.1, clear the scene
@@ -406,31 +417,39 @@ def run_pipeline():
         set_viewport_clipping()
 
         # 4.2 add the cameras with height offset
-        camera_from_google_maps_url_lookat(
-            data['sites'][county_val][f'site{site_num_val}']['google_url_view1'], 
-            'Camera1',
-            camera_height_offset=50.0  # Add 50m above calculated position
-        )
-        camera_from_google_maps_url_lookat(
-            data['sites'][county_val][f'site{site_num_val}']['google_url_view2'], 
-            'Camera2',
-            camera_height_offset=50.0  # Add 50m above calculated position
-        )
+        cameraIDX = 1
+        for key in data['sites'][county_val][f'site{site_num_val}'].keys():
+            if 'google_url' in key:
+                camera_from_google_maps_url_lookat(
+                    data['sites'][county_val][f'site{site_num_val}'][key], 
+                    f'Camera{cameraIDX}',
+                    camera_height_offset=50.0  # Add 50m above calculated position
+                )
+                cameraIDX += 1
 
         # 5. Save the final result
         output_name = f"{county_val}_site{site_num_val}.blend"
         output_path = os.path.join(f"/Users/noahdewar/Documents/HighTide/data/{state}/counties/{county_val}/blender/site{site_num_val}/", output_name)
         bpy.ops.wm.save_as_mainfile(filepath=output_path)
         print(f"Done! Project saved to: {output_path}")
-
-        # 4.3 Run RenderImages after cameras are set up
-        render_script_path = os.path.join(script_dir, "RenderImages.py")
-        if os.path.exists(render_script_path):
-            print(f"--- Running: RenderImages.py ---")
-            with open(render_script_path, 'r') as f:
-                exec(f.read(), shared_context)
+        if use_flyover:
+            flyover_script_path = os.path.join(script_dir, "RenderFlyOver.py")
+            if os.path.exists(flyover_script_path):
+                print("--- Running: FlyoverRender.py ---")
+                shared_context['flyover_config'] = flyover_config  # pass config in
+                with open(flyover_script_path, 'r') as f:
+                    exec(f.read(), shared_context)
+            else:
+                print(f"SKIPPING: FlyoverRender.py not found at {flyover_script_path}")
         else:
-            print(f"SKIPPING: RenderImages.py not found at {render_script_path}")
+            render_script_path = os.path.join(script_dir, "RenderImages.py")
+            if os.path.exists(render_script_path):
+                print("--- Running: RenderImages.py ---")
+                with open(render_script_path, 'r') as f:
+                    exec(f.read(), shared_context)
+            else:
+                print(f"SKIPPING: RenderImages.py not found at {render_script_path}")
+
 
         # 5. Save the final result
         output_name = f"{county_val}_site{site_num_val}.blend"
@@ -589,14 +608,26 @@ def run_pipeline_existing(
         else:
             print(f"Camera {cam_name} already exists — skipping")
 
-    # 6. Render all cameras
-    render_script_path = os.path.join(script_dir, "RenderImages.py")
-    if os.path.exists(render_script_path):
-        print("--- Running: RenderImages.py ---")
-        with open(render_script_path, 'r') as f:
-            exec(f.read(), shared_context)
+    # split based on flyover or normal rendering
+    flyover_config = site_config.get('flyover', {})
+    use_flyover = flyover_config.get('enabled', False)
+    if use_flyover:
+        flyover_script_path = os.path.join(script_dir, "RenderFlyOver.py")
+        if os.path.exists(flyover_script_path):
+            print("--- Running: FlyoverRender.py ---")
+            shared_context['flyover_config'] = flyover_config  # pass config in
+            with open(flyover_script_path, 'r') as f:
+                exec(f.read(), shared_context)
+        else:
+            print(f"SKIPPING: FlyoverRender.py not found at {flyover_script_path}")
     else:
-        print(f"SKIPPING: RenderImages.py not found at {render_script_path}")
+        render_script_path = os.path.join(script_dir, "RenderImages.py")
+        if os.path.exists(render_script_path):
+            print("--- Running: RenderImages.py ---")
+            with open(render_script_path, 'r') as f:
+                exec(f.read(), shared_context)
+        else:
+            print(f"SKIPPING: RenderImages.py not found at {render_script_path}")
 
     # 7. Save
     print(f"Saving .blend to: {blend_path}")
@@ -610,6 +641,7 @@ def run_pipeline_dispatcher():
       New pipeline:      blender -b -P run_pipeline.py -- florida brevard 1 MyProject
       Existing pipeline: blender -b -P run_pipeline.py -- florida brevard 1 MyProject --existing
     """
+    startTime = time.time()
     try:
         args = sys.argv[sys.argv.index("--") + 1:]
         state = args[0]
@@ -626,6 +658,7 @@ def run_pipeline_dispatcher():
             run_pipeline_existing(state, county_val, site, project_name)
     else:
         run_pipeline()  # original flow
-
+    totalTime = float(str((time.time()-startTime)*100).split('.')[0])/100
+    print(f'Blender masterRunner took {totalTime} seconds to run: {args}')
 if __name__ == "__main__":
     run_pipeline_dispatcher()
