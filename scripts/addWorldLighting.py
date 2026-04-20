@@ -5,7 +5,10 @@ import math
 #exrFile = 'syferfontein_1d_clear_4k.exr'
 
 # bluer one
-exrFile = 'kloofendal_48d_partly_cloudy_puresky_4k.exr'
+#exrFile = 'kloofendal_48d_partly_cloudy_puresky_4k.exr'
+
+# one in existing files
+exrFile = 'citrus_orchard_road_puresky_4k.exr'
 
 # 1. Setup World Data
 # Get the world or create one if it doesn't exist

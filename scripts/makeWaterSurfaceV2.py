@@ -157,13 +157,20 @@ def create_florida_water(material_name="GeneratedComplexMaterial", render_fps=24
     links.new(volume.outputs['Volume'],   material_output.inputs['Volume'])
 
     # --- Drivers ---
-    # Flow speed also needs to be proportional to mesh size.
-    # At 5196m span, frame/120 would move the texture ~43m per frame — way too fast.
-    flow_div   = (mesh_span / 5.0) * (render_fps / 24.0)   # ~5m/s drift
-    swell_div  = 150 * (render_fps / 24.0)
-    ripple_div = 60  * (render_fps / 24.0)
+    # 1. Flow Speed (Linear drift)
+    # Target speed in meters per second (e.g., 0.5 m/s is a gentle current)
+    target_flow_speed_ms = 0.5 
+    
+    # Formula: To move 1 real meter, we move (1.0 / mesh_span) in mapping space.
+    flow_div = (mesh_span * render_fps) / target_flow_speed_ms
 
-    flow_driver = mapping.inputs['Location'].driver_add('default_value', 0)
+    # 2. Phase Speed (The "boil" or evolution of the ripples)
+    # The 'W' value of 4D noise changes the seed. Evolving by 1.0 completely morphs it.
+    # We need to scale these divisors WAY up so it evolves slowly.
+    swell_div  = 1600 * (render_fps / 24.0)  # Slow, rolling evolution
+    ripple_div = 800  * (render_fps / 24.0)  # Faster, choppy surface evolution
+
+    flow_driver = mapping.inputs['Location'].driver_add('default_value', 0) # Drive X axis
     flow_driver.driver.expression = f'frame / {flow_div:.2f}'
 
     w_driver1 = noise_large.inputs['W'].driver_add('default_value')
@@ -181,6 +188,19 @@ def create_florida_water(material_name="GeneratedComplexMaterial", render_fps=24
                 obj.data.materials[0] = mat
             print(f"Assigned {material_name} to {obj.name}")
 
+    # Force depsgraph to register and evaluate all drivers
+    bpy.context.scene.frame_set(bpy.context.scene.frame_current)
+    bpy.context.view_layer.update()
+    
+    # Tag the node tree as updated so Blender marks drivers as active
+    mat.node_tree.animation_data_create()
+    
+    # Explicitly tag drivers for depsgraph
+    if mat.node_tree.animation_data:
+        for driver in mat.node_tree.animation_data.drivers:
+            driver.driver.is_valid  # accessing this property forces validation
+        print(f"  Registered {len(mat.node_tree.animation_data.drivers)} drivers")
+    
     return mat
 
 # Run the function
