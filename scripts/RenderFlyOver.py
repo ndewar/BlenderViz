@@ -30,7 +30,8 @@ output_directory = os.path.join(
 )
 
 def ease_in_out(t):
-    return t * t * t * (t * (6 * t - 15) + 10)
+    # Gentle quadratic ease-in-out (smoothstep)
+    return t * t * (3 - 2 * t)
 
 def natural_sort_key(obj):
     return [int(text) if text.isdigit() else text.lower() for text in re.split('([0-9]+)', obj.name)]
@@ -160,6 +161,11 @@ else:
         mp4_path = os.path.join(output_directory, f"{output_name}.mp4")
 
         if os.path.exists(gif_path) and os.path.exists(mp4_path):
+            continue
+
+        # temp skip to let the studio run the USACE and LOW and HIGH scenarios while macbookair does NOAA
+        if 'High' in layer or 'Low' in layer or 'USACE' in layer:
+            print(f'skipping {layer} for simple multiprocessing')
             continue
         
         # render the frames

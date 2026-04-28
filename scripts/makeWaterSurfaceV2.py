@@ -26,10 +26,13 @@ def apply_scale_direct(obj):
     obj.data.update()
     print(f"  Scale baked: {obj.name}")
 
-def create_florida_water(material_name="GeneratedComplexMaterial", render_fps=24):
+def create_florida_water(material_name="GeneratedComplexMaterial", render_fps=24, animate_water=True):
     """
-    Creates a modern, physically accurate water material with animated 
+    Creates a modern, physically accurate water material with animated
     multi-scale ripples, dynamic specular highlights, and volume absorption.
+
+    Args:
+        animate_water: If False, water will be static (no movement during flyover)
     """
     # --- Apply scale and measure mesh ---
     print("Applying scale to floodmap objects...")
@@ -156,28 +159,31 @@ def create_florida_water(material_name="GeneratedComplexMaterial", render_fps=24
     links.new(bsdf.outputs['BSDF'],       material_output.inputs['Surface'])
     links.new(volume.outputs['Volume'],   material_output.inputs['Volume'])
 
-    # --- Drivers ---
-    # 1. Flow Speed (Linear drift)
-    # Target speed in meters per second (e.g., 0.5 m/s is a gentle current)
-    target_flow_speed_ms = 0.5 
-    
-    # Formula: To move 1 real meter, we move (1.0 / mesh_span) in mapping space.
-    flow_div = (mesh_span * render_fps) / target_flow_speed_ms
+    # --- Drivers (only if animation is enabled) ---
+    if animate_water:
+        # 1. Flow Speed (Linear drift)
+        # Target speed in meters per second (e.g., 0.5 m/s is a gentle current)
+        target_flow_speed_ms = 0.5
 
-    # 2. Phase Speed (The "boil" or evolution of the ripples)
-    # The 'W' value of 4D noise changes the seed. Evolving by 1.0 completely morphs it.
-    # We need to scale these divisors WAY up so it evolves slowly.
-    swell_div  = 1600 * (render_fps / 24.0)  # Slow, rolling evolution
-    ripple_div = 800  * (render_fps / 24.0)  # Faster, choppy surface evolution
+        # Formula: To move 1 real meter, we move (1.0 / mesh_span) in mapping space.
+        flow_div = (mesh_span * render_fps) / target_flow_speed_ms
 
-    flow_driver = mapping.inputs['Location'].driver_add('default_value', 0) # Drive X axis
-    flow_driver.driver.expression = f'frame / {flow_div:.2f}'
+        # 2. Phase Speed (The "boil" or evolution of the ripples)
+        # The 'W' value of 4D noise changes the seed. Evolving by 1.0 completely morphs it.
+        # We need to scale these divisors WAY up so it evolves slowly.
+        swell_div  = 1600 * (render_fps / 24.0)  # Slow, rolling evolution
+        ripple_div = 800  * (render_fps / 24.0)  # Faster, choppy surface evolution
 
-    w_driver1 = noise_large.inputs['W'].driver_add('default_value')
-    w_driver1.driver.expression = f'frame / {swell_div:.2f}'
+        flow_driver = mapping.inputs['Location'].driver_add('default_value', 0) # Drive X axis
+        flow_driver.driver.expression = f'frame / {flow_div:.2f}'
 
-    w_driver2 = noise_fine.inputs['W'].driver_add('default_value')
-    w_driver2.driver.expression = f'frame / {ripple_div:.2f}'
+        w_driver1 = noise_large.inputs['W'].driver_add('default_value')
+        w_driver1.driver.expression = f'frame / {swell_div:.2f}'
+
+        w_driver2 = noise_fine.inputs['W'].driver_add('default_value')
+        w_driver2.driver.expression = f'frame / {ripple_div:.2f}'
+    else:
+        print("  Water animation disabled - water will be static")
 
     # --- Assign Material ---
     for obj in bpy.data.objects:
@@ -205,5 +211,7 @@ def create_florida_water(material_name="GeneratedComplexMaterial", render_fps=24
 
 # Run the function
 render_fps = globals().get('render_fps', 24)
+animate_water = globals().get('animate_water', True)  # Set to False for static water
+
 diagnose_floodmap()
-create_florida_water(render_fps=render_fps)
+create_florida_water(render_fps=render_fps, animate_water=animate_water)

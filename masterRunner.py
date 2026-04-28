@@ -142,7 +142,7 @@ def safe_clean_scene():
 
 def apply_render_settings(scene):
     scene.render.engine = 'CYCLES'
-    scene.cycles.samples = 124
+    scene.cycles.samples = 32
     scene.cycles.use_adaptive_sampling = True
     scene.cycles.adaptive_threshold = 0.01 
     scene.cycles.preview_samples = 32
@@ -205,9 +205,12 @@ def build_shared_context(state, county, site_num, site_config, is_existing):
         'zoom': 18,
         'worldLightingRotationAngle': site_config.get('worldLightingRotationAngle', 0),
         'world_lighting_strength': site_config.get('world_lighting_strength', 1.0),
-        'restrict_import': not is_existing, 
+        'restrict_import': not is_existing,
+        'dem_decimate_ratio': site_config.get('dem_decimate_ratio', 0.25),
+        'water_decimate_ratio': site_config.get('water_decimate_ratio', 0.1),
         'sat_image_zoom': site_config.get('sat_image_zoom', 18),
         'render_fps': flyover_config.get('fps', 24),
+        'animate_water': site_config.get('animate_water', True),  # Set to False for static water
         'update_flag': not is_existing,
         'flyover_config': flyover_config
     }
@@ -241,12 +244,12 @@ def process_single_site(state, county, site_num, project_name, site_config, is_e
         print(f"Rasters already in scene: {present}\nRasters to import: {missing}")
         if missing:
             run_external_script(script_dir, "importRasters.py", shared_context)
-            run_external_script(script_dir, "assignWaterSurface.py", shared_context)
+            run_external_script(script_dir, "assignWaterSurfaceV2.py", shared_context)
         else:
             print("All rasters present — skipping import.")
     else:
         esri_multipatch = site_config.get('ESRI_multi_patch_path', None)
-        scripts_to_run = ["importRasters.py", "addSatImage.py", "addWorldLighting.py", "makeWaterSurface.py", "setUpCompositing.py"]
+        scripts_to_run = ["importRasters.py", "addSatImage.py", "addWorldLighting.py", "makeWaterSurfaceV2.py", "setUpCompositing.py"]
         if not esri_multipatch:
             scripts_to_run.append("addBuildings.py")
 
