@@ -164,17 +164,30 @@ else:
             continue
 
         # temp skip to let the studio run the USACE and LOW and HIGH scenarios while macbookair does NOAA
-        if 'High' in layer or 'Low' in layer or 'USACE' in layer:
+        if 'High' in layer or 'Low' in layer or 'USACE' in layer or 'NOAA' in layer:
             print(f'skipping {layer} for simple multiprocessing')
             continue
         
+        # fix layer names
+        if 'NOAA' in layer:
+            fixed_layer_name = layer.replace('NOAA','NOAA_2017_Intermediate-High')
+        elif 'High' in layer:
+            fixed_layer_name = layer.replace('High','NOAA_2017_High')
+        elif 'Low' in layer:
+            fixed_layer_name = layer.replace('Low','NOAA_2017_Intermediate-Low')
+        elif 'USACE'  in layer:
+            fixed_layer_name = layer.replace('USACE','USACE_2013_High')
+        else:
+            fixed_layer_name = layer
+        fixed_layer_name = fixed_layer_name.replace('noFlood','Baseline_No_Flooding').replace('floodmap_','').replace('_3857','').split('_site')[0]
+ 
         # render the frames
         render_utils.toggle_visibility(layer)
         frame_paths = render_flyover_frames(render_cam_obj, all_cameras, layer)
-
+        
         # Stamp them all in parallel
         existing_frames = [p for p in frame_paths if os.path.exists(p)]
-        render_utils.batch_apply_captions(existing_frames, layer, version_num, site_name, site_num, 'Flight Path 1', font_path)
+        render_utils.batch_apply_captions(existing_frames, fixed_layer_name, version_num, site_name, site_num, 'Flight Path 1', font_path)
 
         # assemble the outputs
         assemble_outputs(frame_paths, gif_path, mp4_path)

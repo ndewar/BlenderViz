@@ -33,10 +33,10 @@ except ImportError:
 def get_caption_lines(layer_name, version_num, site_name, site_num, camera_name):
     """Formats the raw layer name into two clean caption lines."""
     caption_line_one = f"Site {site_num} - {site_name} - {camera_name.replace('Camera','Camera ')}"
-    print(layer_name)
+    #print(layer_name)
     caption_line_two = layer_name.replace('yr_',' Year, ').replace('noFlood_','').replace('saturated','Saturated Conditions,').replace('_',' ').split('site')[0].replace(' C1',' Category 1 Storm Surge').replace(' 3857','')
     caption_line_two = caption_line_two.replace(' Category',' Sea Level Rise Projection + High Tide Flooding and Category')
-    print(caption_line_two)
+    #print(caption_line_two)
     caption_line_three = f"{str(date.today())} - Version {version_num}"
 
     return caption_line_one, caption_line_two, caption_line_three
