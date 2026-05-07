@@ -1,113 +1,206 @@
 import bpy
+import os
 
-def setup_compositing_nodes():
-    """
-    Constructs a compositing node tree in Blender based on a provided log.
-    The script sets up an Alpha Over node, Image node, Scale nodes,
-    and a Translate node, then connects them to a Viewer node and a Composite node.
-    """
+# ==========================================
+# --- CONFIGURATION ---
+# ==========================================
+# Grab configurations from globals
+flyover_config = globals().get('flyover_config', {})
+is_animation = flyover_config.get("enabled", False)
 
-    # Enable compositing nodes
+# Determine if the legend should be shown based on coloring variables
+data_overlays = globals().get('data_overlays', {})
+flood_raster_coloring = data_overlays.get('flood_raster_depth_coloring', {}).get('enabled', False)
+building_coloring = data_overlays.get('building_flood_colors', {}).get('enabled', False)
+SHOW_LEGEND = flood_raster_coloring or building_coloring
+
+FOG_COLOR = (0.6, 0.7, 0.8, 1.0)
+
+# --- DEBUG SETTINGS ---
+DEBUG_ENABLED = False
+DEBUG_DIR = "/Users/noahdewar/Documents/HighTide/debug_renders/"
+
+# --- FILE PATHS ---
+LOGO_PATH = bpy.path.abspath("/Users/noahdewar/Documents/HighTide/Powered-by-HighTide.png")
+LEGEND_PATH = bpy.path.abspath("/Users/noahdewar/Documents/HighTide/BlenderViz/blender_flood_depth_legend.png")
+
+def setup_compositing_nodes(is_animation_enabled, show_legend):
     bpy.context.scene.use_nodes = True
     tree = bpy.context.scene.node_tree
 
-    # Clear existing nodes to start fresh
+    bpy.context.view_layer.use_pass_mist = is_animation_enabled
+    
+    if is_animation_enabled:
+        dem_obj = next((obj for obj in bpy.data.objects if 'dem' in obj.name.lower() and obj.type == 'MESH'), None)
+        if dem_obj:
+            scene_size = max(dem_obj.dimensions)
+            fog_start = scene_size * 0.05
+            fog_depth = scene_size * 1.5
+            for cam in bpy.data.cameras:
+                cam.clip_end = scene_size * 2.0
+                cam.clip_start = 10.0 
+        else:
+            fog_start = 500.0
+            fog_depth = 25000.0 
+            for cam in bpy.data.cameras:
+                cam.clip_end = 50000.0
+                cam.clip_start = 10.0
+
+        bpy.context.scene.world.mist_settings.start = fog_start
+        bpy.context.scene.world.mist_settings.depth = fog_depth
+
+    # Clear existing nodes
     for node in tree.nodes:
         tree.nodes.remove(node)
 
-    # Add Render Layers node (usually present by default, but good to ensure)
+    # --- 1. RENDER & POST-PROCESSING BASE ---
     render_layers_node = tree.nodes.new(type='CompositorNodeRLayers')
-    render_layers_node.location = (-1200, 400) # Set an initial position
+    render_layers_node.location = (-1500, 400) 
 
-    # Add Alpha Over node
-    alpha_over_node = tree.nodes.new(type="CompositorNodeAlphaOver")
-    alpha_over_node.location = (50, 230)
+    glare_node = tree.nodes.new(type="CompositorNodeGlare")
+    glare_node.location = (-1200, 400)
+    glare_node.glare_type = 'FOG_GLOW'
+    glare_node.quality = 'HIGH'
+    glare_node.size = 8                 
+    glare_node.threshold = 1.0          
 
-    # Add Image node
-    image_node = tree.nodes.new(type="CompositorNodeImage")
-    image_node.location = (-900, -200)
-    # Open the image file
-    try:
-        # Construct the absolute path from the relative path provided in the log
-        # This assumes the script is run from within the Blender project directory
-        # Adjust this path if your script's location or image location differs
-        image_path = bpy.path.abspath("/Users/noahdewar/Documents/HighTide/Powered-by-HighTide.png")
-        image_node.image = bpy.data.images.load(image_path)
-    except RuntimeError:
-        print(f"Warning: Could not load image at {image_path}. Please ensure the path is correct.")
-        print("You may need to manually set the image for the 'Image' node after running the script.")
+    current_image_output = glare_node.outputs["Image"]
+    mist_mix_node = None
+    
+    if is_animation_enabled:
+        mist_mix_node = tree.nodes.new(type="CompositorNodeMixRGB")
+        mist_mix_node.location = (-900, 400)
+        mist_mix_node.inputs[2].default_value = FOG_COLOR
+        
+        tree.links.new(current_image_output, mist_mix_node.inputs[1])
+        tree.links.new(render_layers_node.outputs["Mist"], mist_mix_node.inputs[0])
+        current_image_output = mist_mix_node.outputs["Image"]
 
-
-    # Add first Scale node
-    scale_node_1 = tree.nodes.new(type="CompositorNodeScale")
-    scale_node_1.location = (-600, -40)
-    scale_node_1.inputs[1].default_value = 0.375  # X Scale
-    scale_node_1.inputs[2].default_value = 0.375  # Y Scale
-
+    # Grab render resolution for mathematical placement
     render = bpy.context.scene.render
     res_x = render.resolution_x * (render.resolution_percentage / 100)
     res_y = render.resolution_y * (render.resolution_percentage / 100)
+    margin_x, margin_y = 30, 30
 
-    # Logo dimensions
-    logo_source_w = 960
-    logo_source_h = 384
-    logo_scale = 0.375
+    # --- 2. ADD LEGEND (BOTTOM-LEFT) ---
+    if show_legend:
+        print("  Legend enabled. Adding to compositor...")
+        try:
+            legend_img = bpy.data.images.load(LEGEND_PATH)
+            
+            legend_node = tree.nodes.new(type="CompositorNodeImage")
+            legend_node.location = (-900, 0)
+            legend_node.image = legend_img
+            
+            # Use 'RELATIVE' space to avoid default_value crash
+            scale_leg = tree.nodes.new(type="CompositorNodeScale")
+            scale_leg.location = (-600, 0)
+            scale_leg.space = 'RELATIVE'
+            scale_leg.inputs['X'].default_value = 0.25  # Adjust legend scale here
+            scale_leg.inputs['Y'].default_value = 0.25  
 
-    logo_w = logo_source_w * logo_scale  # = 360px
-    logo_h = logo_source_h * logo_scale  # = 144px
+            # Calculate bottom-left coordinates
+            leg_w, leg_h = legend_img.size[0] * 0.25, legend_img.size[1] * 0.25
+            trans_leg_x = -(res_x / 2) + (leg_w / 2) + margin_x
+            trans_leg_y = -(res_y / 2) + (leg_h / 2) + margin_y
 
-    # Margin from bottom-right corner
-    margin_x = 20
-    margin_y = 20
+            trans_leg = tree.nodes.new(type="CompositorNodeTranslate")
+            trans_leg.location = (-300, 0)
+            trans_leg.inputs['X'].default_value = trans_leg_x
+            trans_leg.inputs['Y'].default_value = trans_leg_y
 
-    # Absolute pixel position (compositor origin = center of frame)
-    translate_x = (res_x / 2) - (logo_w / 2) - margin_x
-    translate_y = -(res_y / 2) + (logo_h / 2) + margin_y
+            alpha_over_leg = tree.nodes.new(type="CompositorNodeAlphaOver")
+            alpha_over_leg.location = (0, 400)
 
-    # Add Translate node
-    translate_node = tree.nodes.new(type="CompositorNodeTranslate")
-    translate_node.location = (-300, 60)
-    translate_node.inputs[1].default_value = translate_x
-    translate_node.inputs[2].default_value = translate_y
-    translate_node.use_relative = False  # Absolute pixels
+            # Link the legend into the chain
+            tree.links.new(legend_node.outputs["Image"], scale_leg.inputs["Image"])
+            tree.links.new(scale_leg.outputs["Image"], trans_leg.inputs["Image"])
+            tree.links.new(current_image_output, alpha_over_leg.inputs[1])
+            tree.links.new(trans_leg.outputs["Image"], alpha_over_leg.inputs[2])
+            
+            # Update the chain to pass through the legend
+            current_image_output = alpha_over_leg.outputs["Image"]
+            
+        except RuntimeError:
+            print(f"  [!] Error: Could not load Legend image at {LEGEND_PATH}")
 
-    # Add second Scale node
-    scale_node_2 = tree.nodes.new(type="CompositorNodeScale")
-    scale_node_2.location = (-100, 7) # Adjusted location for better flow
+    # --- 3. ADD LOGO WATERMARK (BOTTOM-RIGHT) ---
+    try:
+        logo_img = bpy.data.images.load(LOGO_PATH)
+        
+        logo_node = tree.nodes.new(type="CompositorNodeImage")
+        logo_node.location = (-900, -300)
+        logo_node.image = logo_img
 
+        scale_logo = tree.nodes.new(type="CompositorNodeScale")
+        scale_logo.location = (-600, -300)
+        scale_logo.space = 'RELATIVE'
+        scale_logo.inputs['X'].default_value = 0.375  
+        scale_logo.inputs['Y'].default_value = 0.375  
 
-    # Add Viewer node
+        # Calculate bottom-right coordinates
+        logo_w, logo_h = logo_img.size[0] * 0.375, logo_img.size[1] * 0.375
+        trans_logo_x = (res_x / 2) - (logo_w / 2) - margin_x
+        trans_logo_y = -(res_y / 2) + (logo_h / 2) + margin_y
+
+        trans_logo = tree.nodes.new(type="CompositorNodeTranslate")
+        trans_logo.location = (-300, -300)
+        trans_logo.inputs['X'].default_value = trans_logo_x
+        trans_logo.inputs['Y'].default_value = trans_logo_y
+
+        alpha_over_logo = tree.nodes.new(type="CompositorNodeAlphaOver")
+        alpha_over_logo.location = (300, 400)
+
+        # Link Logo into the chain
+        tree.links.new(logo_node.outputs["Image"], scale_logo.inputs["Image"])
+        tree.links.new(scale_logo.outputs["Image"], trans_logo.inputs["Image"])
+        tree.links.new(current_image_output, alpha_over_logo.inputs[1])
+        tree.links.new(trans_logo.outputs["Image"], alpha_over_logo.inputs[2])
+
+        # Finalize chain
+        current_image_output = alpha_over_logo.outputs["Image"]
+
+    except RuntimeError:
+        print(f"  [!] Error: Could not load Logo image at {LOGO_PATH}")
+
+    # --- 4. OUTPUT ---
     viewer_node = tree.nodes.new(type="CompositorNodeViewer")
-    viewer_node.location = (400, 170)
+    viewer_node.location = (600, 500)
     
-    # Add Composite output node
     composite_node = tree.nodes.new(type="CompositorNodeComposite")
-    composite_node.location = (700, 230) # Position it after Alpha Over
+    composite_node.location = (600, 300) 
 
-    # --- Link Nodes ---
-    links = tree.links
+    tree.links.new(render_layers_node.outputs["Image"], glare_node.inputs["Image"])
+    tree.links.new(current_image_output, viewer_node.inputs["Image"])
+    tree.links.new(current_image_output, composite_node.inputs["Image"])
 
-    # Link Render Layers Image to Alpha Over Image (Top)
-    links.new(render_layers_node.outputs["Image"], alpha_over_node.inputs[1])
+    # ==========================================
+    # --- DEBUGGING FILE OUTPUT NODE ---
+    # ==========================================
+    if DEBUG_ENABLED:
+        os.makedirs(DEBUG_DIR, exist_ok=True)
+        debug_out = tree.nodes.new(type="CompositorNodeOutputFile")
+        debug_out.location = (100, 700)
+        debug_out.label = "DEBUG OUTPUT"
+        debug_out.base_path = DEBUG_DIR
+        debug_out.format.file_format = 'PNG'
+        debug_out.file_slots.clear()
 
-    # Link Image node Image to Scale node 1 Image
-    links.new(image_node.outputs["Image"], scale_node_1.inputs["Image"])
+        debug_out.file_slots.new("01_Raw_Render_")
+        tree.links.new(render_layers_node.outputs["Image"], debug_out.inputs["01_Raw_Render_"])
 
-    # Link Scale node 1 Image to Translate node Image
-    links.new(scale_node_1.outputs["Image"], translate_node.inputs["Image"])
+        if "Mist" in render_layers_node.outputs:
+            debug_out.file_slots.new("02_Raw_Mist_")
+            tree.links.new(render_layers_node.outputs["Mist"], debug_out.inputs["02_Raw_Mist_"])
 
-    # Link Translate node Image to Scale node 2 Image
-    links.new(translate_node.outputs["Image"], scale_node_2.inputs["Image"])
+        debug_out.file_slots.new("03_After_Glare_")
+        tree.links.new(glare_node.outputs["Image"], debug_out.inputs["03_After_Glare_"])
 
-    # Link Scale node 2 Image to Alpha Over Image (Bottom)
-    links.new(scale_node_2.outputs["Image"], alpha_over_node.inputs[2])
+        if mist_mix_node:
+            debug_out.file_slots.new("04_After_Fog_")
+            tree.links.new(mist_mix_node.outputs["Image"], debug_out.inputs["04_After_Fog_"])
 
-    # Link Alpha Over Image to Viewer Image
-    links.new(alpha_over_node.outputs["Image"], viewer_node.inputs["Image"])
-    
-    # Link Alpha Over Image to Composite node Image (for final render output)
-    links.new(alpha_over_node.outputs["Image"], composite_node.inputs["Image"])
+        print(f"Debug nodes added! Check {DEBUG_DIR} after rendering.")
 
-    print("Compositing node tree constructed successfully!")
-
-setup_compositing_nodes()
+# Execute Script
+setup_compositing_nodes(is_animation, SHOW_LEGEND)

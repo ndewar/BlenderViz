@@ -75,6 +75,7 @@ def camera_from_google_maps_url_lookat(url, camera_name="GoogleMapsCamera", dem_
     
     cam.rotation_euler = (pitch, roll, yaw)
     cam.data.clip_end = 1000000
+    bpy.context.scene.camera = cam
 
     return { "latitude": lat, "longitude": lon, "camera_location": tuple(cam.location) }
 
@@ -211,6 +212,8 @@ def build_shared_context(state, county, site_num, site_config, is_existing):
         'sat_image_zoom': site_config.get('sat_image_zoom', 18),
         'render_fps': flyover_config.get('fps', 24),
         'animate_water': site_config.get('animate_water', True),  # Set to False for static water
+        'color_ramp': site_config.get('color_ramp', {}),  # Shared color ramp for depth visualization
+        'data_overlays': site_config.get('data_overlays', {}),  # Data overlay settings
         'update_flag': not is_existing,
         'flyover_config': flyover_config
     }
@@ -271,14 +274,14 @@ def process_single_site(state, county, site_num, project_name, site_config, is_e
     # 5. Global Render Settings
     scene = bpy.context.scene
     apply_render_settings(scene)
-    
+
     flyover_config = site_config.get('flyover', {})
-    if not is_existing and flyover_config.get('enabled', False):
-        scene.cycles.samples = 32  # Faster test renders for new flyovers
+    if flyover_config.get('enabled', False):
+        scene.cycles.samples = 32  # Faster test renders for flyovers
 
     set_viewport_clipping()
 
-    # 6. Setup Cameras
+    # 6. Setup Cameras (must happen before data overlays for label tracking)
     cameraIDX = 1
     for key, url in site_config.items():
         if 'google_url' in key:
@@ -289,17 +292,22 @@ def process_single_site(state, county, site_num, project_name, site_config, is_e
                 camera_from_google_maps_url_lookat(url, cam_name, camera_height_offset=50.0)
             cameraIDX += 1
 
-    # 7. Checkpoint Save
+    # 7. Apply data overlays (flood colors, asset rings, labels) - after cameras are set up
+    data_overlays_config = site_config.get('data_overlays', {})
+    if data_overlays_config.get('enabled', False):
+        run_external_script(script_dir, "addDataOverlays.py", shared_context)
+
+    # 8. Checkpoint Save
     os.makedirs(blend_dir, exist_ok=True)
     bpy.ops.wm.save_as_mainfile(filepath=blend_path)
 
-    # 8. Render
+    # 9. Render
     if flyover_config.get('enabled', False):
         run_external_script(script_dir, "RenderFlyOver.py", shared_context)
     else:
         run_external_script(script_dir, "RenderImages.py", shared_context)
 
-    # 9. Final Save
+    # 10. Final Save
     bpy.ops.wm.save_as_mainfile(filepath=blend_path)
     print(f"Done! Project saved to: {blend_path}")
 
@@ -332,10 +340,18 @@ def run_pipeline_dispatcher():
     
     print(f"Running pipeline (Existing={is_existing}) for state: {state}, county: {county_val}, sites: {sitesToRun}, project: {project_name}")
 
+    # Get top-level config options
+    top_level_data_overlays = data.get('data_overlays', {})
+    top_level_color_ramp = data.get('color_ramp', {})
+
     for site_num in sitesToRun:
         print(f"\n\n{'='*40}\nProcessing Site {site_num}\n{'='*40}")
         site_config = data['sites'][county_val][f'site{site_num}']
-        
+
+        # Merge top-level configs into site_config
+        site_config['data_overlays'] = top_level_data_overlays
+        site_config['color_ramp'] = top_level_color_ramp
+
         process_single_site(state, county_val, site_num, project_name, site_config, is_existing)
 
         # Reset memory blocks if generating new scenes in a sequence

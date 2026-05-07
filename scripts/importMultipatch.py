@@ -292,6 +292,8 @@ def import_multipatch_obj(obj_path, json_path, collection, material):
         return None
     
     attrs = metadata.get('attributes', {})
+
+    globalID = attrs.get('GlobalID','xxx-xxx-xxx').lstrip('{').rstrip('}')
     
     # Get origin coordinates from JSON (in source CRS units - US feet)
     ox = attrs.get('ESRI3DO_OX', 0)
@@ -357,6 +359,9 @@ def import_multipatch_obj(obj_path, json_path, collection, material):
                 obj.data.materials.append(material)
             else:
                 obj.data.materials[0] = material
+        
+        # set name
+        obj.name = globalID
 
     return imported_objs
 

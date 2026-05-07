@@ -29,6 +29,52 @@ except ImportError:
         print(f"CRITICAL ERROR: Failed to load Pillow: {e}")
 # ------------------------------------
 
+def update_labels_for_camera(camera):
+    """
+    Update asset label visibility and orientation based on the current render camera.
+    Labels are hidden if the camera is farther than their max_distance property.
+    Labels re-target their TRACK_TO constraint to face the current camera.
+    """
+    if "Asset_Labels" not in bpy.data.collections:
+        return
+
+    label_collection = bpy.data.collections["Asset_Labels"]
+    # Use world matrix translation for accurate global coordinates
+    cam_loc = camera.matrix_world.translation
+
+    for label in label_collection.objects:
+        # --- 1. Update Distance / Visibility ---
+        max_dist = label.get('max_distance', 500)
+        label_loc = label.matrix_world.translation
+
+        dist_sq = (label_loc.x - cam_loc.x)**2 + (label_loc.y - cam_loc.y)**2 + (label_loc.z - cam_loc.z)**2
+        max_dist_sq = max_dist ** 2
+
+        # Hide from render if too far
+        label.hide_render = dist_sq > max_dist_sq
+        
+        # Optional: Hide in viewport as well
+        # label.hide_viewport = dist_sq > max_dist_sq
+
+        # --- 2. Update Orientation ---
+        # Look for an existing Track To constraint
+        track_constraint = None
+        for constraint in label.constraints:
+            if constraint.type == 'TRACK_TO':
+                track_constraint = constraint
+                break
+        
+        # If it doesn't exist, create it on the fly
+        if not track_constraint:
+            track_constraint = label.constraints.new(type='TRACK_TO')
+            
+        # Target the current camera
+        track_constraint.target = camera
+        
+        # ENFORCE THE AXES (This prevents sideways/upside-down labels)
+        # For standard Blender Text and Planes, Z is usually forward and Y is up.
+        track_constraint.track_axis = 'TRACK_Z' 
+        track_constraint.up_axis = 'UP_Y'
 
 def get_caption_lines(layer_name, version_num, site_name, site_num, camera_name):
     """Formats the raw layer name into two clean caption lines."""

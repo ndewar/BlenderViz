@@ -10,6 +10,7 @@ script_dir = "/Users/noahdewar/Documents/HighTide/BlenderViz/scripts/"
 if script_dir not in sys.path:
     sys.path.append(script_dir)
 import render_utils
+import addDataOverlays
 
 # --- Configuration ---
 site_name = globals().get('site_name', 1)
@@ -18,6 +19,8 @@ font_path = globals()['font_path']
 version_num = globals().get('versionNum', 1)
 state = globals().get('state', 'florida')
 county = globals().get('county', 'brevard')
+data_overlays_config = globals().get('data_overlays', {})
+color_ramp_config = globals().get('color_ramp', {})
 flyover_config = globals().get('flyover_config', {})
 clean_up_frames = flyover_config.get('clean_up_frames', False)
 
@@ -67,7 +70,7 @@ def get_or_create_flyover_cam(source_cam):
     bpy.context.scene.camera = render_cam_obj
     return render_cam_obj
 
-def render_flyover_frames(render_cam_obj, cameras, layer_name):
+def render_flyover_frames(render_cam_obj, cameras, layer_name, properties):
     frames_dir = os.path.join(output_directory, "frames", layer_name)
     os.makedirs(frames_dir, exist_ok=True)
     
@@ -112,11 +115,15 @@ def render_flyover_frames(render_cam_obj, cameras, layer_name):
         render_cam_obj.location = loc_start.lerp(loc_end, local_t_pos)
         render_cam_obj.rotation_mode = 'QUATERNION'
         render_cam_obj.rotation_quaternion = rot_start.slerp(rot_end, local_t_rot)
-        
+
+        # Update label visibility based on camera distance
+        render_utils.update_labels_for_camera(render_cam_obj)
+        addDataOverlays.apply_asset_labels(properties, data_overlays_config, camera=render_cam_obj)
+
         bpy.context.scene.frame_set(i + 1)
         bpy.context.view_layer.update()
         bpy.context.scene.render.filepath = frame_path
-        
+
         # Render the frame
         bpy.ops.render.render(write_still=True)
         
@@ -155,6 +162,17 @@ else:
     setup_render_settings()
     render_cam_obj = get_or_create_flyover_cam(all_cameras[0])
 
+    # --- NEW: Load properties once before the loop ---
+    mp_properties = {}
+    if globals().get('data_overlays', {}).get('enabled', False):
+        import addDataOverlays
+        mp_properties = addDataOverlays.load_properties()
+        for key in list(mp_properties.keys()):
+            guid = mp_properties[key].get('GlobalID', '')
+            if guid:
+                mp_properties[guid.lstrip('{').rstrip('}')] = mp_properties[key]
+    # -------------------------------------------------
+
     for layer in flyover_flood_layers:
         output_name = f"flyover_{layer}_v{version_num}"
         gif_path = os.path.join(output_directory, f"{output_name}.gif")
@@ -164,9 +182,9 @@ else:
             continue
 
         # temp skip to let the studio run the USACE and LOW and HIGH scenarios while macbookair does NOAA
-        if 'High' in layer or 'Low' in layer or 'USACE' in layer or 'NOAA' in layer:
-            print(f'skipping {layer} for simple multiprocessing')
-            continue
+        #if 'High' in layer or 'Low' in layer or 'USACE' in layer or 'noFlood' in layer or '2040' in layer:
+        #    print(f'skipping {layer} for simple multiprocessing')
+        #    continue
         
         # fix layer names
         if 'NOAA' in layer:
@@ -183,7 +201,13 @@ else:
  
         # render the frames
         render_utils.toggle_visibility(layer)
-        frame_paths = render_flyover_frames(render_cam_obj, all_cameras, layer)
+        # --- NEW: Update building colors for the current scenario ---
+        if globals().get('data_overlays', {}).get('enabled', False):
+            cleaned_scenario = 'no_flood' if layer == 'noFlood' else layer.lower().replace('floodmap_', '').split('_site')[0]
+            globals()['flood_scenario'] = cleaned_scenario
+            addDataOverlays.apply_building_flood_colors(mp_properties, data_overlays_config, color_ramp_config, scenario=layer)
+        # ------------------------------------------------------------
+        frame_paths = render_flyover_frames(render_cam_obj, all_cameras, layer, mp_properties)
         
         # Stamp them all in parallel
         existing_frames = [p for p in frame_paths if os.path.exists(p)]
