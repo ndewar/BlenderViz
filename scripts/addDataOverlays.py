@@ -117,7 +117,7 @@ def apply_building_flood_colors(properties, passed_config, color_ramp_config, sc
         return
 
     print(f"  Coloring buildings with scenario: {scenario}")
-    scenario = scenario.replace('floodmap_','').replace('_site4_3857','')
+    scenario = scenario.replace('floodmap_','').split('_site')[0]
     print(f"  Actual lookup name: {scenario}")
 
     min_depth    = color_ramp_config['min_depth']
