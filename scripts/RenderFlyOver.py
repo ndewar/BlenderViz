@@ -85,6 +85,18 @@ def render_flyover_frames(render_cam_obj, cameras, layer_name, properties):
         mat = cam.matrix_world.copy()
         transforms.append((mat.to_translation(), mat.to_quaternion()))
 
+    # Position camera at frame 0 first
+    loc_start, rot_start = transforms[0], transforms[0]  # just use first cam
+    render_cam_obj.location = transforms[0][0]
+    render_cam_obj.rotation_mode = 'QUATERNION'
+    render_cam_obj.rotation_quaternion = transforms[0][1]
+    bpy.context.view_layer.update()
+
+    # NOW create labels with correct cam_z
+    if globals().get('data_overlays', {}).get('enabled', False):
+        addDataOverlays.apply_asset_labels(properties, data_overlays_config, camera=render_cam_obj)
+        addDataOverlays.register_visibility_handlers()
+
     for i in range(total_frames):
         frame_path = os.path.join(frames_dir, f"frame_{i:04d}.png")
         frame_paths.append(frame_path)
@@ -118,7 +130,6 @@ def render_flyover_frames(render_cam_obj, cameras, layer_name, properties):
 
         # Update label visibility based on camera distance
         render_utils.update_labels_for_camera(render_cam_obj)
-        addDataOverlays.apply_asset_labels(properties, data_overlays_config, camera=render_cam_obj)
 
         bpy.context.scene.frame_set(i + 1)
         bpy.context.view_layer.update()
