@@ -14,15 +14,33 @@ import os
 import json
 import math
 import mathutils
+import addon_utils
+import importlib
 
-# Try to import BlenderGIS for coordinate transformation
+# --- Try to dynamically find and load BlenderGIS ---
 HAS_BLENDERGIS = False
-try:
-    from BlenderGIS import geoscene
-    from BlenderGIS.core import proj
-    HAS_BLENDERGIS = True
-except ImportError:
-    print("Warning: BlenderGIS not available.")
+candidate_names = ["BlenderGIS", "BlenderGIS-master", "blendergis", "blendergis-master"]
+ADDON = None
+
+for mod in addon_utils.modules():
+    if mod.__name__ in candidate_names:
+        ADDON = mod.__name__
+        break
+
+if ADDON:
+    try:
+        loaded, enabled = addon_utils.check(ADDON)
+        if not enabled:
+            addon_utils.enable(ADDON, default_set=True, persistent=True)
+        
+        # Dynamically load the modules we need using the localized name
+        geoscene = importlib.import_module(f"{ADDON}.geoscene")
+        proj = importlib.import_module(f"{ADDON}.core.proj")
+        HAS_BLENDERGIS = True
+    except Exception as e:
+        print(f"Warning: Found {ADDON} but failed to load submodules: {e}")
+else:
+    print("Warning: BlenderGIS not found on this system.")
 
 # --- CONFIGURATION ---
 state = globals().get('state', 'florida')
@@ -47,6 +65,13 @@ def get_scene_origin():
         scn = bpy.context.scene
         geoscn_obj = geoscene.GeoScene(scn)
         return geoscn_obj.crsx, geoscn_obj.crsy, geoscn_obj.scale
+    
+    # Bulletproof Fallback: check if the scene has the properties natively attached
+    if hasattr(bpy.context.scene, 'geoscene'):
+        gs = bpy.context.scene.geoscene
+        return gs.crsx, gs.crsy, gs.scale
+        
+    print("  [!] Could not determine geoscene origin. Buildings will be placed at 0,0.")
     return 0, 0, 1
 
 
