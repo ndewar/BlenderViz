@@ -10,14 +10,27 @@ import json
 import mathutils
 from mathutils import Vector
 
-ADDON = "BlenderGIS"
+# 1. Define the possible folder names
+candidate_names = ["BlenderGIS", "BlenderGIS-master", "blendergis", "blendergis-master"]
+ADDON = None
 
-# 1. Enable addon
+# 2. Scan Blender's installed addons to find the correct local name
+for mod in addon_utils.modules():
+    if mod.__name__ in candidate_names:
+        ADDON = mod.__name__
+        break
+
+if ADDON is None:
+    raise ImportError("[!] BlenderGIS addon not found on this system. Please ensure it is installed.")
+
+# 3. Enable the found addon
 loaded, enabled = addon_utils.check(ADDON)
 if not enabled:
     addon_utils.enable(ADDON, default_set=True, persistent=True)
 
-BlenderGIS = importlib.import_module("BlenderGIS")
+# 4. Import the module using the localized name
+BlenderGIS = importlib.import_module(ADDON)
+print(f"Successfully loaded addon: {ADDON}")
 georef = BlenderGIS.core.georaster.georef 
 
 # --- Shared Helper Functions ---
@@ -215,6 +228,7 @@ def build_shared_context(state, county, site_num, site_config, is_existing):
         'color_ramp': site_config.get('color_ramp', {}),  # Shared color ramp for depth visualization
         'data_overlays': site_config.get('data_overlays', {}),  # Data overlay settings
         'update_flag': not is_existing,
+        "building_obj_path": site_config.get('building_obj_path', ''),
         'flyover_config': flyover_config
     }
 
@@ -247,17 +261,21 @@ def process_single_site(state, county, site_num, project_name, site_config, is_e
         print(f"Rasters already in scene: {present}\nRasters to import: {missing}")
         if missing:
             run_external_script(script_dir, "importRasters.py", shared_context)
-            run_external_script(script_dir, "assignWaterSurfaceV2.py", shared_context)
+            run_external_script(script_dir, "makeWaterSurfaceV2.py", shared_context)
         else:
             print("All rasters present — skipping import.")
     else:
         esri_multipatch = site_config.get('ESRI_multi_patch_path', None)
+        buildings_obj = site_config.get('building_obj_path', None)
         scripts_to_run = ["importRasters.py", "addSatImage.py", "addWorldLighting.py", "makeWaterSurfaceV2.py", "setUpCompositing.py"]
-        if not esri_multipatch:
+        if not esri_multipatch and not buildings_obj:
             scripts_to_run.append("addBuildings.py")
 
         for script in scripts_to_run:
             run_external_script(script_dir, script, shared_context)
+
+        if buildings_obj:
+            run_external_script(script_dir, "importMasterBuildings.py", shared_context)
 
         if esri_multipatch:
             shared_context.update({
@@ -338,21 +356,29 @@ def run_pipeline_dispatcher():
     # Handle multiple sites
     sitesToRun = [int(x) for x in site_num_val.split(',')] if ',' in site_num_val else [int(site_num_val)]
     
+    # if theres a comma in counties, then different sites are in different counties
+    if ',' in county_val:
+        counties = county_val.split(',')
+    else:
+        counties = [county_val]*len(sitesToRun)
+    if len(counties) != len(sitesToRun):
+        raise Exception(f'Number of counties and sites must match, countes: {len(counties)}, sites: {len(sitesToRun)}')
+
     print(f"Running pipeline (Existing={is_existing}) for state: {state}, county: {county_val}, sites: {sitesToRun}, project: {project_name}")
 
     # Get top-level config options
     top_level_data_overlays = data.get('data_overlays', {})
     top_level_color_ramp = data.get('color_ramp', {})
 
-    for site_num in sitesToRun:
+    for site_num, county in zip(sitesToRun,counties):
         print(f"\n\n{'='*40}\nProcessing Site {site_num}\n{'='*40}")
-        site_config = data['sites'][county_val][f'site{site_num}']
+        site_config = data['sites'][county][f'site{site_num}']
 
         # Merge top-level configs into site_config
         site_config['data_overlays'] = top_level_data_overlays
         site_config['color_ramp'] = top_level_color_ramp
 
-        process_single_site(state, county_val, site_num, project_name, site_config, is_existing)
+        process_single_site(state, county, site_num, project_name, site_config, is_existing)
 
         # Reset memory blocks if generating new scenes in a sequence
         if not is_existing and site_num != sitesToRun[-1]:

@@ -185,31 +185,22 @@ else:
     # -------------------------------------------------
 
     for layer in flyover_flood_layers:
-        output_name = f"flyover_{layer}_v{version_num}"
-        gif_path = os.path.join(output_directory, f"{output_name}.gif")
-        mp4_path = os.path.join(output_directory, f"{output_name}.mp4")
+        # fix layer names and make output filename
+        fixed_layer_name, fixed_layer_name_only_scenario = render_utils.process_scenario_name(layer)
+        output_name = f"flyover_{fixed_layer_name}_v{version_num}"
 
+        # make output paths and folders
+        gif_path = os.path.join(output_directory, fixed_layer_name_only_scenario, f"{output_name}.gif")
+        mp4_path = os.path.join(output_directory, fixed_layer_name_only_scenario, f"{output_name}.mp4")
+        os.makedirs(os.path.join(output_directory, fixed_layer_name_only_scenario),exist_ok=True)
         if os.path.exists(gif_path) and os.path.exists(mp4_path):
             continue
 
         # temp skip to let the studio run the USACE and LOW and HIGH scenarios while macbookair does NOAA
-        #if 'High' in layer or 'Low' in layer or 'USACE' in layer or 'noFlood' in layer or '2040' in layer:
-        #    print(f'skipping {layer} for simple multiprocessing')
-        #    continue
-        
-        # fix layer names
-        if 'NOAA' in layer:
-            fixed_layer_name = layer.replace('NOAA','NOAA_2017_Intermediate-High')
-        elif 'High' in layer:
-            fixed_layer_name = layer.replace('High','NOAA_2017_High')
-        elif 'Low' in layer:
-            fixed_layer_name = layer.replace('Low','NOAA_2017_Intermediate-Low')
-        elif 'USACE'  in layer:
-            fixed_layer_name = layer.replace('USACE','USACE_2013_High')
-        else:
-            fixed_layer_name = layer
-        fixed_layer_name = fixed_layer_name.replace('noFlood','Baseline_No_Flooding').replace('floodmap_','').replace('_3857','').split('_site')[0]
- 
+        if 'High' in layer or 'Low' in layer or 'USACE' in layer or 'noFlood' in layer:
+            print(f'skipping {layer} for simple multiprocessing')
+            continue
+
         # render the frames
         render_utils.toggle_visibility(layer)
         # --- NEW: Update building colors for the current scenario ---

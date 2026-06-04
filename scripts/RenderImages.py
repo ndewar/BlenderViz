@@ -41,20 +41,11 @@ def render_and_save(collection_name, camera_name, update_flag=True):
     render_utils.update_labels_for_camera(camera)
 
     print(collection_name)
-    if 'NOAA' in collection_name:
-        collection_name = collection_name.replace('NOAA','NOAA_2017_Intermediate-High')
-    elif 'High' in collection_name:
-        collection_name = collection_name.replace('High','NOAA_2017_High')
-    elif 'Low' in collection_name:
-        collection_name = collection_name.replace('Low','NOAA_2017_Intermediate-Low')
-    elif 'USACE'  in collection_name:
-        collection_name = collection_name.replace('USACE','USACE_2013_High')
-    collection_name = collection_name.replace('noFlood','Baseline_No_Flooding').replace('floodmap_','').replace('_3857','').split('_site')[0]
-
+    collection_name, collection_name_only_scenario = render_utils.process_scenario_name(collection_name)
     print(collection_name)
     bpy.context.scene.camera = camera
-    filename = f"{collection_name.replace('_C1','')}_{camera_name}_v{version_num}.{image_format.lower()}"
-    filepath = os.path.join(output_directory + f"/{camera_name}/{collection_name.replace('_C1','').replace('2040_','').replace('2070_','').replace('2100_','')}", filename)
+    filename = f"{collection_name}_{camera_name}_v{version_num}.{image_format.lower()}"
+    filepath = os.path.join(output_directory + f"/{camera_name}/{collection_name_only_scenario}", filename)
     
     if os.path.exists(filepath) and not update_flag:
         print(f"Skipping render: {filepath} already exists")

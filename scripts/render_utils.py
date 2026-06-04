@@ -29,6 +29,20 @@ except ImportError:
         print(f"CRITICAL ERROR: Failed to load Pillow: {e}")
 # ------------------------------------
 
+def process_scenario_name(collection_name):
+    if 'NOAA' in collection_name:
+        collection_name = collection_name.replace('NOAA','NOAA_2017_Intermediate-High')
+    elif 'High' in collection_name:
+        collection_name = collection_name.replace('High','NOAA_2017_High')
+    elif 'Low' in collection_name:
+        collection_name = collection_name.replace('Low','NOAA_2017_Intermediate-Low')
+    elif 'USACE' in collection_name:
+        collection_name = collection_name.replace('USACE','USACE_2013_High')
+    elif 'extremeRainfall_FAR' in collection_name:
+        collection_name = collection_name.replace('extremeRainfall_FAR','Extreme_Rainfall_Drain_Flow_Depth')
+    collection_name = collection_name.replace('noFlood','Baseline_No_Flooding').replace('floodmap_','').replace('_3857','').split('_site')[0]
+    return collection_name, collection_name.replace('2030_','').replace('2040_','').replace('2050_','').replace('2060_','').replace('2070_','').replace('2080_','').replace('2090_','').replace('2100_','')
+
 def update_labels_for_camera(camera):
     """
     Update asset label visibility and orientation based on the current render camera.

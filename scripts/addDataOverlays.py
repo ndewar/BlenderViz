@@ -40,7 +40,7 @@ def load_properties():
         return {}
     with open(properties_path, 'r') as f:
         properties = json.load(f)
-    print(f"  Loaded properties for {len(properties)} objects")
+    print(f"  Loaded properties for {len(properties)} objects (Legacy Workflow)")
     return properties
 
 
@@ -117,6 +117,7 @@ def apply_building_flood_colors(properties, passed_config, color_ramp_config, sc
         return
 
     print(f"  Coloring buildings with scenario: {scenario}")
+    scenario = str(scenario)
     scenario = scenario.replace('floodmap_','').split('_site')[0]
     print(f"  Actual lookup name: {scenario}")
 
@@ -130,11 +131,16 @@ def apply_building_flood_colors(properties, passed_config, color_ramp_config, sc
         if obj.type != 'MESH' or 'dem' in obj.name.lower():
             continue
 
-        props = properties.get(obj.name)
-        if not props:
+        # HYBRID LOOKUP: Try native Blender property first, then fallback to JSON props
+        props = properties.get(obj.name, {})
+        raw_depth = obj.get(scenario)
+        if raw_depth is None:
+            raw_depth = props.get(scenario)
+            
+        if raw_depth is None or raw_depth<0.0001:
             continue
 
-        flood_depth = float(props.get(scenario, 0) or 0) if scenario else 0.0
+        flood_depth = float(raw_depth or 0)
 
         obj['flood_depth'] = flood_depth
         obj['scenario']    = scenario
@@ -148,10 +154,12 @@ def apply_building_flood_colors(properties, passed_config, color_ramp_config, sc
             material_cache[mat_name] = create_flood_material(mat_name, color)
 
         mat = material_cache[mat_name]
-        if obj.data.materials:
-            obj.data.materials[0] = mat
-        else:
-            obj.data.materials.append(mat)
+        
+        # --- NEW: Clear ALL existing materials from roofs and walls ---
+        obj.data.materials.clear()
+        
+        # Add the single flood material (applies to the whole building)
+        obj.data.materials.append(mat)
 
         colored_count += 1
 
@@ -235,21 +243,27 @@ def apply_asset_rings(properties):
     material_cache = {}
     ring_count     = 0
 
-    for obj in bpy.data.objects:
+    # SAFETY FIX: Wrap in list() so we don't iterate over the rings we are actively creating
+    for obj in list(bpy.data.objects):
         if obj.type != 'MESH' or 'dem' in obj.name.lower():
             continue
 
-        props    = properties.get(obj.name)
-        if not props:
+        # HYBRID LOOKUP
+        props = properties.get(obj.name, {})
+        
+        # PERFORMANCE FIX: Ensure this is actually a critical asset before we build a ring!
+        ca_id = obj.get('CA_ID') or props.get('CA_ID') or obj.get('HighTideID') or props.get('HighTideID')
+        if not ca_id:
             continue
-        ca_class = props.get('CA_Class')
+            
+        ca_class = obj.get('CA_Class') or props.get('CA_Class') or obj.get('AssetClass') or props.get('AssetClass')
         if not ca_class:
             continue
 
         if bpy.data.objects.get(f"Ring_{obj.name}"):
             continue
 
-        color    = class_colors[ca_class]
+        color    = class_colors.get(ca_class, class_colors.get('default', [1.0, 1.0, 1.0]))
         mat_name = f"RingMaterial_{ca_class.replace(' ', '_')}"
         if mat_name not in material_cache:
             material_cache[mat_name] = create_ring_material(mat_name, color, glow_strength)
@@ -257,8 +271,12 @@ def apply_asset_rings(properties):
         base_pos = get_building_base_center(obj)
         radius   = get_building_footprint_radius(obj)
 
+        # ring_height/2 accounts for the torus thickness, +0.5m gives it a clean hover gap
+        hover_z = base_pos[2] + (ring_height / 2) + 0.5
+        ring_location = (base_pos[0], base_pos[1], hover_z)
+
         bpy.ops.mesh.primitive_torus_add(
-            location=base_pos,
+            location=ring_location,
             major_radius=radius,
             minor_radius=ring_height / 2,
             major_segments=48,
@@ -267,7 +285,7 @@ def apply_asset_rings(properties):
         ring_obj      = bpy.context.active_object
         ring_obj.name = f"Ring_{obj.name}"
         ring_obj['CA_Class']        = ca_class
-        ring_obj['CA_Name']         = props.get('CA_Name') or ""
+        ring_obj['CA_Name']         = obj.get('CA_Name') or props.get('CA_Name') or obj.get('AssetName') or props.get('AssetName') or ""
         ring_obj['parent_building'] = obj.name
         
         ring_obj['fade_alpha']      = 1.0
@@ -608,12 +626,14 @@ def apply_asset_labels(properties, passed_data_overlays_config, camera=None):
         if obj.type != 'MESH' or 'dem' in obj.name.lower():
             continue
 
-        props = properties.get(obj.name)
-        if not props or not props.get('CA_ID'):
+        # HYBRID LOOKUP
+        props = properties.get(obj.name, {})
+        ca_id = obj.get('CA_ID') or props.get('CA_ID') or obj.get('HighTideID') or props.get('HighTideID')
+        if not ca_id:
             continue
 
-        ca_name  = props.get('CA_Name') or 'Unnamed Asset'
-        ca_class = props.get('CA_Class', 'default')
+        ca_name  = obj.get('CA_Name') or props.get('CA_Name') or obj.get('AssetName') or props.get('AssetName') or 'Unnamed Asset'
+        ca_class = obj.get('CA_Class') or props.get('CA_Class') or obj.get('AssetClass') or props.get('AssetClass') or 'default'
 
         if bpy.data.objects.get(f"Label_{obj.name}"):
             continue
@@ -646,7 +666,7 @@ def apply_asset_labels(properties, passed_data_overlays_config, camera=None):
         bpy.ops.object.text_add(location=label_pos)
         text_obj              = bpy.context.active_object
         text_obj.name         = f"Label_{obj.name}"
-        text_obj.data.body    = ca_name
+        text_obj.data.body    = str(ca_name)
         text_obj.data.size    = base_size
         text_obj.data.align_x = 'CENTER'
         text_obj.data.align_y = 'BOTTOM'
@@ -744,7 +764,6 @@ def update_label_visibility(scene, depsgraph):
             cam_dist     = (camera.matrix_world.translation - text_obj.location).length
             
             # --- FIXED MARGIN MATH ---
-            # Ensure the margin is never larger than the object's total visible distance to prevent negative fade zones.
             actual_margin = min(raw_fade_margin, max_distance * 0.9)
             if actual_margin <= 0.0:
                 actual_margin = 1.0 
@@ -856,19 +875,19 @@ def register_visibility_handlers():
 if data_overlays_config.get('enabled', False):
     print("\n--- Applying Data Overlays ---")
 
+    # Load properties (Handles legacy ESRI multipatch workflow if present)
     properties = load_properties()
-
     for key in list(properties.keys()):
         guid = properties[key].get('GlobalID', '')
         if guid:
             clean = guid.lstrip('{').rstrip('}')
             properties[clean] = properties[key]
 
-    if properties:
-        apply_building_flood_colors(properties, data_overlays_config, color_ramp_config)
-        apply_asset_labels(properties, data_overlays_config)
-        apply_asset_rings(properties)
-        register_visibility_handlers()
+    # Pass the dictionary in. Functions will prioritize Native Custom Properties first.
+    apply_building_flood_colors(properties, data_overlays_config, color_ramp_config, flood_scenario)
+    apply_asset_labels(properties, data_overlays_config)
+    apply_asset_rings(properties)
+    register_visibility_handlers()
 
     print("--- Data Overlays Complete ---\n")
 else:
