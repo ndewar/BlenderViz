@@ -116,55 +116,40 @@ def apply_building_flood_colors(properties, passed_config, color_ramp_config, sc
         print("  Building flood colors: disabled")
         return
 
-    print(f"  Coloring buildings with scenario: {scenario}")
-    scenario = str(scenario)
-    scenario = scenario.replace('floodmap_','').split('_site')[0]
-    print(f"  Actual lookup name: {scenario}")
-
+    scenario = str(scenario).replace('floodmap_','').split('_site')[0]
     min_depth    = color_ramp_config['min_depth']
     max_depth    = color_ramp_config['max_depth']
     color_values = color_ramp_config['values']
     material_cache = {}
     colored_count  = 0
 
-    for obj in bpy.data.objects:
-        if obj.type != 'MESH' or 'dem' in obj.name.lower():
-            continue
-
-        # HYBRID LOOKUP: Try native Blender property first, then fallback to JSON props
+    # Filter target objects once
+    target_objects = [obj for obj in bpy.data.objects if obj.type == 'MESH' and 'dem' not in obj.name.lower()]
+    for obj in target_objects:
         props = properties.get(obj.name, {})
         raw_depth = obj.get(scenario)
         if raw_depth is None:
             raw_depth = props.get(scenario)
             
-        if raw_depth is None or raw_depth<0.0001:
+        if raw_depth is None or raw_depth < 0.0001:
             continue
 
         flood_depth = float(raw_depth or 0)
-
         obj['flood_depth'] = flood_depth
         obj['scenario']    = scenario
 
         color        = interpolate_color(flood_depth, min_depth, max_depth, color_values)
         depth_bucket = round(flood_depth * 2) / 2
-
         mat_name = f"FloodDepth_{scenario}_{depth_bucket:.1f}"
 
         if mat_name not in material_cache:
             material_cache[mat_name] = create_flood_material(mat_name, color)
-
-        mat = material_cache[mat_name]
         
-        # --- NEW: Clear ALL existing materials from roofs and walls ---
         obj.data.materials.clear()
-        
-        # Add the single flood material (applies to the whole building)
-        obj.data.materials.append(mat)
-
+        obj.data.materials.append(material_cache[mat_name])
         colored_count += 1
 
     print(f"  Colored {colored_count} buildings for scenario '{scenario}'")
-
 
 # ------------------------------------------------------------------
 # Asset rings
@@ -230,77 +215,56 @@ def apply_asset_rings(properties):
     glow_strength = config.get('glow_strength', 10.0)
     ring_height   = config.get('ring_height', 1.0)
     max_distance  = data_overlays_config.get('asset_labels', {}).get('max_distance', 2000.0)
+    class_colors  = config['class_colors']
 
-    class_colors = config['class_colors']
-
-    ring_collection = (
-        bpy.data.collections.get("Asset_Rings")
-        or bpy.data.collections.new("Asset_Rings")
-    )
+    ring_collection = bpy.data.collections.get("Asset_Rings") or bpy.data.collections.new("Asset_Rings")
     if ring_collection.name not in bpy.context.scene.collection.children:
         bpy.context.scene.collection.children.link(ring_collection)
 
     material_cache = {}
     ring_count     = 0
 
-    # SAFETY FIX: Wrap in list() so we don't iterate over the rings we are actively creating
-    for obj in list(bpy.data.objects):
-        if obj.type != 'MESH' or 'dem' in obj.name.lower():
-            continue
+    # Create ONE base torus mesh data outside the loop
+    temp_mesh = bpy.data.meshes.new("BaseRingMesh")
+    temp_obj = bpy.data.objects.new("TempTorus", temp_mesh)
+    bpy.context.collection.objects.link(temp_obj)
+    bpy.context.view_layer.objects.active = temp_obj
+    bpy.ops.mesh.primitive_torus_add(major_radius=1.0, minor_radius=ring_height / 2, major_segments=48, minor_segments=12)
+    base_torus_mesh = bpy.context.active_object.data
+    bpy.data.objects.remove(bpy.context.active_object, do_unlink=True)
 
-        # HYBRID LOOKUP
+    target_objects = [obj for obj in bpy.data.objects if obj.type == 'MESH' and 'dem' not in obj.name.lower()]
+
+    for obj in tqdm(target_objects, desc="Generating Asset Rings", unit="ring"):
         props = properties.get(obj.name, {})
-        
-        # PERFORMANCE FIX: Ensure this is actually a critical asset before we build a ring!
         ca_id = obj.get('CA_ID') or props.get('CA_ID') or obj.get('HighTideID') or props.get('HighTideID')
-        if not ca_id:
-            continue
-            
         ca_class = obj.get('CA_Class') or props.get('CA_Class') or obj.get('AssetClass') or props.get('AssetClass')
-        if not ca_class:
+        
+        if not ca_id or not ca_class or f"Ring_{obj.name}" in bpy.data.objects:
             continue
 
-        if bpy.data.objects.get(f"Ring_{obj.name}"):
-            continue
-
-        color    = class_colors.get(ca_class, class_colors.get('default', [1.0, 1.0, 1.0]))
+        color = class_colors.get(ca_class, class_colors.get('default', [1.0, 1.0, 1.0]))
         mat_name = f"RingMaterial_{ca_class.replace(' ', '_')}"
         if mat_name not in material_cache:
             material_cache[mat_name] = create_ring_material(mat_name, color, glow_strength)
 
         base_pos = get_building_base_center(obj)
         radius   = get_building_footprint_radius(obj)
+        hover_z  = base_pos[2] + (ring_height / 2) + 0.5
 
-        # ring_height/2 accounts for the torus thickness, +0.5m gives it a clean hover gap
-        hover_z = base_pos[2] + (ring_height / 2) + 0.5
-        ring_location = (base_pos[0], base_pos[1], hover_z)
-
-        bpy.ops.mesh.primitive_torus_add(
-            location=ring_location,
-            major_radius=radius,
-            minor_radius=ring_height / 2,
-            major_segments=48,
-            minor_segments=12
-        )
-        ring_obj      = bpy.context.active_object
-        ring_obj.name = f"Ring_{obj.name}"
+        # Create new object pointing to shared mesh
+        ring_obj = bpy.data.objects.new(f"Ring_{obj.name}", base_torus_mesh)
+        ring_obj.location = (base_pos[0], base_pos[1], hover_z)
+        ring_obj.scale = (radius, radius, 1.0) 
+        
         ring_obj['CA_Class']        = ca_class
         ring_obj['CA_Name']         = obj.get('CA_Name') or props.get('CA_Name') or obj.get('AssetName') or props.get('AssetName') or ""
         ring_obj['parent_building'] = obj.name
-        
         ring_obj['fade_alpha']      = 1.0
         ring_obj['max_distance']    = max_distance
 
-        for coll in ring_obj.users_collection:
-            coll.objects.unlink(ring_obj)
         ring_collection.objects.link(ring_obj)
-
-        mat = material_cache[mat_name]
-        if ring_obj.data.materials:
-            ring_obj.data.materials[0] = mat
-        else:
-            ring_obj.data.materials.append(mat)
-
+        ring_obj.data.materials.append(material_cache[mat_name])
         ring_count += 1
 
     print(f"  Created {ring_count} asset rings")
@@ -309,28 +273,21 @@ def apply_asset_rings(properties):
 # ------------------------------------------------------------------
 # Asset labels
 # ------------------------------------------------------------------
-def create_label_backing(name, text_obj, padding, material, collection):
-    bpy.context.view_layer.update()
-
-    text_w = text_obj.dimensions.x
-    text_h = text_obj.dimensions.y
-
-    card_w = text_w + (padding * 2)
+def create_label_backing(name, text_obj, local_w, local_h, padding, material, collection):
+    card_w = local_w + (padding * 2)
     
     verts = [
-        (-card_w / 2, -padding,          0),
-        ( card_w / 2, -padding,          0),
-        ( card_w / 2,  text_h + padding, 0),
-        (-card_w / 2,  text_h + padding, 0),
+        (-card_w / 2, -padding,         0),
+        ( card_w / 2, -padding,         0),
+        ( card_w / 2, local_h + padding, 0),
+        (-card_w / 2, local_h + padding, 0),
     ]
     faces = [(0, 1, 2, 3)]
 
     mesh = bpy.data.meshes.new(f"{name}_mesh")
     mesh.from_pydata(verts, [], faces)
-    mesh.update()
 
     card_obj = bpy.data.objects.new(name, mesh)
-    
     card_obj['fade_alpha']   = 1.0
     card_obj['max_distance'] = text_obj.get('max_distance', 2000.0)
 
@@ -339,7 +296,7 @@ def create_label_backing(name, text_obj, padding, material, collection):
     bevel_mod = card_obj.modifiers.new(name="Rounded_Corners", type='BEVEL')
     bevel_mod.affect = 'VERTICES'
     bevel_mod.width = padding * 0.75
-    bevel_mod.segments = 12
+    bevel_mod.segments = 4 
 
     card_obj.parent   = text_obj
     card_obj.location = (0, 0, -0.1) 
@@ -508,29 +465,23 @@ def create_smooth_curve_callout(name, start_pos, end_pos, thickness, material, c
     curve_data.dimensions = '3D'
     curve_data.fill_mode = 'FULL'
     curve_data.bevel_depth = thickness
-    curve_data.bevel_resolution = 4
-    curve_data.resolution_u = 12 
+    curve_data.bevel_resolution = 2 
+    curve_data.resolution_u = 6     
 
     sx, sy, sz = start_pos
     ex, ey, ez = end_pos
-    dx = ex - sx
-    dy = ey - sy
-    dz = ez - sz
+    dx, dy, dz = ex - sx, ey - sy, ez - sz
 
     spline = curve_data.splines.new(type='BEZIER')
     spline.bezier_points.add(1)
 
-    p0 = spline.bezier_points[0]
-    p1 = spline.bezier_points[1]
-
+    p0, p1 = spline.bezier_points[0], spline.bezier_points[1]
     p0.co = (0, 0, 0)
-    p0.handle_left_type = 'FREE'
-    p0.handle_right_type = 'FREE'
+    p0.handle_left_type = p0.handle_right_type = 'FREE'
     p0.handle_right = (0, 0, dz * 0.5) 
 
     p1.co = (dx, dy, dz)
-    p1.handle_left_type = 'FREE'
-    p1.handle_right_type = 'FREE'
+    p1.handle_left_type = p1.handle_right_type = 'FREE'
     p1.handle_left = (dx, dy, dz * 0.5) 
 
     line_obj = bpy.data.objects.new(name, curve_data)
@@ -538,8 +489,6 @@ def create_smooth_curve_callout(name, start_pos, end_pos, thickness, material, c
     
     if collection:
         collection.objects.link(line_obj)
-
-    bpy.context.view_layer.update()
 
     if material:
         line_obj.data.materials.append(material)
@@ -566,11 +515,10 @@ def apply_asset_labels(properties, passed_data_overlays_config, camera=None):
             for obj in list(collection.objects):
                 obj_data = obj.data
                 bpy.data.objects.remove(obj, do_unlink=True)
-                
                 if obj_data:
                     if isinstance(obj_data, bpy.types.Mesh):
                         bpy.data.meshes.remove(obj_data, do_unlink=True)
-                    elif isinstance(obj_data, bpy.types.TextCurve) or isinstance(obj_data, bpy.types.Curve):
+                    elif isinstance(obj_data, (bpy.types.TextCurve, bpy.types.Curve)):
                         bpy.data.curves.remove(obj_data, do_unlink=True)
 
     dem_obj    = next((o for o in bpy.data.objects if 'dem' in o.name.lower() and o.type == 'MESH'), None)
@@ -601,14 +549,9 @@ def apply_asset_labels(properties, passed_data_overlays_config, camera=None):
     height_t      = max(0.0, min(1.0, (cam_z - height_ref_low) / (height_ref_high - height_ref_low)))
     height_offset = min_height_offset + height_t * (max_height_offset - min_height_offset)
 
-    label_collection = (
-        bpy.data.collections.get("Asset_Labels")
-        or bpy.data.collections.new("Asset_Labels")
-    )
-    line_collection = (
-        bpy.data.collections.get("Asset_Lines")
-        or bpy.data.collections.new("Asset_Lines")
-    )
+    label_collection = bpy.data.collections.get("Asset_Labels") or bpy.data.collections.new("Asset_Labels")
+    line_collection  = bpy.data.collections.get("Asset_Lines")  or bpy.data.collections.new("Asset_Lines")
+    
     if label_collection.name not in bpy.context.scene.collection.children:
         bpy.context.scene.collection.children.link(label_collection)
     if line_collection.name not in bpy.context.scene.collection.children:
@@ -621,117 +564,97 @@ def apply_asset_labels(properties, passed_data_overlays_config, camera=None):
     line_materials  = {}
     placed_labels   = []
     label_count     = 0
-    processed_obj   = 0
 
-    for obj in bpy.data.objects:
-        if obj.type != 'MESH' or 'dem' in obj.name.lower():
-            continue
-        
-        processed_obj +=1
-        if processed_obj % 50 == 0:
-            print(f"  Processing {processed_obj} objects so far out of {len(bpy.data.objects)} objects")
+    target_objects = [obj for obj in bpy.data.objects if obj.type == 'MESH' and 'dem' not in obj.name.lower()]
+    text_objects_to_back = []
 
-        # HYBRID LOOKUP
+    # --- PASS 1: Generate Text and Lines ---
+    for obj in tqdm(target_objects, desc="Generating Labels (Pass 1)", unit="lbl"):
         props = properties.get(obj.name, {})
         ca_id = obj.get('CA_ID') or props.get('CA_ID') or obj.get('HighTideID') or props.get('HighTideID')
-        if not ca_id:
+        if not ca_id or f"Label_{obj.name}" in bpy.data.objects:
             continue
 
         ca_name  = obj.get('CA_Name') or props.get('CA_Name') or obj.get('AssetName') or props.get('AssetName') or 'Unnamed Asset'
         ca_class = obj.get('CA_Class') or props.get('CA_Class') or obj.get('AssetClass') or props.get('AssetClass') or 'default'
-        if ca_class == 'NCH':
-            continue
-        if bpy.data.objects.get(f"Label_{obj.name}"):
-            continue
 
         top_pos   = get_building_top_center(obj)
-        target_x  = top_pos[0]
-        target_y  = top_pos[1]
+        target_x, target_y = top_pos[0], top_pos[1]
         current_z = top_pos[2] + height_offset
 
+        # Simplified overlap check
         for pl in placed_labels:
-            if math.hypot(target_x - pl['x'], target_y - pl['y']) < overlap_radius:
+            if abs(target_x - pl['x']) < overlap_radius and abs(target_y - pl['y']) < overlap_radius:
                 current_z = max(current_z, pl['top_z'] + stack_spacing)
 
         label_pos = (target_x, target_y, current_z)
         placed_labels.append({'x': target_x, 'y': target_y, 'top_z': current_z})
 
         color = class_colors.get(ca_class, class_colors.get('default', [1.0, 1.0, 1.0]))
+        lbl_mat_name, lin_mat_name = f"LabelMaterial_{ca_class.replace(' ', '_')}", f"LineMaterial_{ca_class.replace(' ', '_')}"
+
+        if lbl_mat_name not in label_materials: label_materials[lbl_mat_name] = create_label_material(lbl_mat_name, color)
+        if lin_mat_name not in line_materials:  line_materials[lin_mat_name]  = create_line_material(lin_mat_name, color)
+
+        font_curve = bpy.data.curves.new(type='FONT', name=f"FontCurve_{obj.name}")
+        font_curve.body    = str(ca_name)
+        font_curve.size    = base_size
+        font_curve.align_x = 'CENTER'
+        font_curve.align_y = 'BOTTOM'
+        font_curve.extrude = base_size * 0.02
         
-        lbl_mat_name = f"LabelMaterial_{ca_class.replace(' ', '_')}"
-        lin_mat_name = f"LineMaterial_{ca_class.replace(' ', '_')}"
-
-        if lbl_mat_name not in label_materials:
-            label_materials[lbl_mat_name] = create_label_material(lbl_mat_name, color)
-        if lin_mat_name not in line_materials:
-            line_materials[lin_mat_name] = create_line_material(lin_mat_name, color)
-            
-        label_material = label_materials[lbl_mat_name]
-        line_material  = line_materials[lin_mat_name]
-
-        bpy.ops.object.text_add(location=label_pos)
-        text_obj              = bpy.context.active_object
-        text_obj.name         = f"Label_{obj.name}"
-        text_obj.data.body    = str(ca_name)
-        text_obj.data.size    = base_size
-        text_obj.data.align_x = 'CENTER'
-        text_obj.data.align_y = 'BOTTOM'
-        text_obj.data.extrude = base_size * 0.02
-
-        for coll in text_obj.users_collection:
-            coll.objects.unlink(text_obj)
+        text_obj = bpy.data.objects.new(f"Label_{obj.name}", font_curve)
+        text_obj.location = label_pos
         label_collection.objects.link(text_obj)
-
-        if text_obj.data.materials:
-            text_obj.data.materials[0] = label_material
-        else:
-            text_obj.data.materials.append(label_material)
+        text_obj.data.materials.append(label_materials[lbl_mat_name])
 
         track            = text_obj.constraints.new('TRACK_TO')
         track.target     = camera
         track.track_axis = 'TRACK_Z'
         track.up_axis    = 'UP_Y'
 
-        card_obj = create_label_backing(
-            name=f"Card_{obj.name}",
-            text_obj=text_obj,
-            padding=base_size * 0.15,
-            material=backing_mat,
-            collection=label_collection
-        )
-
         create_dynamic_label_driver(
-            text_obj, 
-            camera,
-            reference_distance=reference_distance,
-            min_scale=min_scale,
-            max_scale=max_scale,
-            growth_speed=growth_speed
+            text_obj, camera, reference_distance=reference_distance,
+            min_scale=min_scale, max_scale=max_scale, growth_speed=growth_speed
         )
         
         line_obj = create_smooth_curve_callout(
-            name=f"Line_{obj.name}",
-            start_pos=top_pos,
-            end_pos=label_pos,
-            thickness=line_thickness,
-            material=line_material,
-            collection=line_collection
+            name=f"Line_{obj.name}", start_pos=top_pos, end_pos=label_pos,
+            thickness=line_thickness, material=line_materials[lin_mat_name], collection=line_collection
         )
 
-        text_obj['fade_alpha']      = 1.0
-        text_obj['glow_multiplier'] = 1.0
-        text_obj['max_distance']    = max_distance
-        text_obj['parent_building'] = obj.name
+        text_obj['fade_alpha'] = text_obj['glow_multiplier'] = 1.0
+        line_obj['fade_alpha'] = line_obj['glow_multiplier'] = 1.0
+        text_obj['max_distance'] = line_obj['max_distance'] = max_distance
+        text_obj['parent_building'] = line_obj['parent_building'] = obj.name
         
-        line_obj['fade_alpha']      = 1.0
-        line_obj['glow_multiplier'] = 1.0
-        line_obj['max_distance']    = max_distance
-        line_obj['parent_building'] = obj.name
-
+        text_objects_to_back.append((obj.name, text_obj))
         label_count += 1
 
-    print(f"  Created {label_count} labels")
+    print(f"  Created {label_count} labels. Calculating exact dimensions...")
+    
+    # --- UPDATE VIEW LAYER EXACTLY ONCE ---
     bpy.context.view_layer.update()
+
+    # --- PASS 2: Generate Exact Backing Cards ---
+    for parent_name, text_obj in tqdm(text_objects_to_back, desc="Building Cards (Pass 2)", unit="card"):
+        
+        # Calculate strict local width/height to avoid rotation distortion
+        bound_box = text_obj.bound_box
+        local_w = max(v[0] for v in bound_box) - min(v[0] for v in bound_box)
+        local_h = max(v[1] for v in bound_box) - min(v[1] for v in bound_box)
+
+        create_label_backing(
+            name=f"Card_{parent_name}", 
+            text_obj=text_obj, 
+            local_w=local_w,
+            local_h=local_h,
+            padding=base_size * 0.15,
+            material=backing_mat, 
+            collection=label_collection
+        )
+
+    print("  Finished generating exact backing cards.")
 
 
 # ------------------------------------------------------------------
