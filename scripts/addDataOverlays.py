@@ -123,9 +123,16 @@ def apply_building_flood_colors(properties, passed_config, color_ramp_config, sc
     material_cache = {}
     colored_count  = 0
 
-    # Filter target objects once
     target_objects = [obj for obj in bpy.data.objects if obj.type == 'MESH' and 'dem' not in obj.name.lower()]
-    for obj in target_objects:
+    total_objs = len(target_objects)
+
+    print(f"  Coloring Buildings ({scenario})...")
+    for i, obj in enumerate(target_objects):
+        
+        # --- Built-in Progress Tracker ---
+        if i % 50 == 0 or i == total_objs - 1:
+            print(f"\r    Progress: {i+1}/{total_objs} ({(i+1)/total_objs*100:.1f}%)", end="", flush=True)
+            
         props = properties.get(obj.name, {})
         raw_depth = obj.get(scenario)
         if raw_depth is None:
@@ -149,7 +156,7 @@ def apply_building_flood_colors(properties, passed_config, color_ramp_config, sc
         obj.data.materials.append(material_cache[mat_name])
         colored_count += 1
 
-    print(f"  Colored {colored_count} buildings for scenario '{scenario}'")
+    print(f"\n  Colored {colored_count} buildings for scenario '{scenario}'")
 
 # ------------------------------------------------------------------
 # Asset rings
@@ -224,7 +231,6 @@ def apply_asset_rings(properties):
     material_cache = {}
     ring_count     = 0
 
-    # Create ONE base torus mesh data outside the loop
     temp_mesh = bpy.data.meshes.new("BaseRingMesh")
     temp_obj = bpy.data.objects.new("TempTorus", temp_mesh)
     bpy.context.collection.objects.link(temp_obj)
@@ -234,8 +240,15 @@ def apply_asset_rings(properties):
     bpy.data.objects.remove(bpy.context.active_object, do_unlink=True)
 
     target_objects = [obj for obj in bpy.data.objects if obj.type == 'MESH' and 'dem' not in obj.name.lower()]
+    total_objs = len(target_objects)
 
-    for obj in tqdm(target_objects, desc="Generating Asset Rings", unit="ring"):
+    print("  Generating Asset Rings...")
+    for i, obj in enumerate(target_objects):
+        
+        # --- Built-in Progress Tracker ---
+        if i % 50 == 0 or i == total_objs - 1:
+            print(f"\r    Progress: {i+1}/{total_objs} ({(i+1)/total_objs*100:.1f}%)", end="", flush=True)
+            
         props = properties.get(obj.name, {})
         ca_id = obj.get('CA_ID') or props.get('CA_ID') or obj.get('HighTideID') or props.get('HighTideID')
         ca_class = obj.get('CA_Class') or props.get('CA_Class') or obj.get('AssetClass') or props.get('AssetClass')
@@ -252,7 +265,6 @@ def apply_asset_rings(properties):
         radius   = get_building_footprint_radius(obj)
         hover_z  = base_pos[2] + (ring_height / 2) + 0.5
 
-        # Create new object pointing to shared mesh
         ring_obj = bpy.data.objects.new(f"Ring_{obj.name}", base_torus_mesh)
         ring_obj.location = (base_pos[0], base_pos[1], hover_z)
         ring_obj.scale = (radius, radius, 1.0) 
@@ -267,7 +279,7 @@ def apply_asset_rings(properties):
         ring_obj.data.materials.append(material_cache[mat_name])
         ring_count += 1
 
-    print(f"  Created {ring_count} asset rings")
+    print(f"\n  Created {ring_count} asset rings")
 
 
 # ------------------------------------------------------------------
@@ -567,9 +579,15 @@ def apply_asset_labels(properties, passed_data_overlays_config, camera=None):
 
     target_objects = [obj for obj in bpy.data.objects if obj.type == 'MESH' and 'dem' not in obj.name.lower()]
     text_objects_to_back = []
+    total_objs = len(target_objects)
 
-    # --- PASS 1: Generate Text and Lines ---
-    for obj in tqdm(target_objects, desc="Generating Labels (Pass 1)", unit="lbl"):
+    print("  Generating Labels (Pass 1)...")
+    for i, obj in enumerate(target_objects):
+        
+        # --- Built-in Progress Tracker ---
+        if i % 50 == 0 or i == total_objs - 1:
+            print(f"\r    Progress: {i+1}/{total_objs} ({(i+1)/total_objs*100:.1f}%)", end="", flush=True)
+            
         props = properties.get(obj.name, {})
         ca_id = obj.get('CA_ID') or props.get('CA_ID') or obj.get('HighTideID') or props.get('HighTideID')
         if not ca_id or f"Label_{obj.name}" in bpy.data.objects:
@@ -582,7 +600,6 @@ def apply_asset_labels(properties, passed_data_overlays_config, camera=None):
         target_x, target_y = top_pos[0], top_pos[1]
         current_z = top_pos[2] + height_offset
 
-        # Simplified overlap check
         for pl in placed_labels:
             if abs(target_x - pl['x']) < overlap_radius and abs(target_y - pl['y']) < overlap_radius:
                 current_z = max(current_z, pl['top_z'] + stack_spacing)
@@ -631,15 +648,21 @@ def apply_asset_labels(properties, passed_data_overlays_config, camera=None):
         text_objects_to_back.append((obj.name, text_obj))
         label_count += 1
 
-    print(f"  Created {label_count} labels. Calculating exact dimensions...")
+    print(f"\n  Created {label_count} labels. Calculating exact dimensions...")
     
     # --- UPDATE VIEW LAYER EXACTLY ONCE ---
     bpy.context.view_layer.update()
 
+    total_cards = len(text_objects_to_back)
+    print("  Building Cards (Pass 2)...")
+    
     # --- PASS 2: Generate Exact Backing Cards ---
-    for parent_name, text_obj in tqdm(text_objects_to_back, desc="Building Cards (Pass 2)", unit="card"):
+    for i, (parent_name, text_obj) in enumerate(text_objects_to_back):
         
-        # Calculate strict local width/height to avoid rotation distortion
+        # --- Built-in Progress Tracker ---
+        if i % 10 == 0 or i == total_cards - 1:
+            print(f"\r    Progress: {i+1}/{total_cards} ({(i+1)/total_cards*100:.1f}%)", end="", flush=True)
+
         bound_box = text_obj.bound_box
         local_w = max(v[0] for v in bound_box) - min(v[0] for v in bound_box)
         local_h = max(v[1] for v in bound_box) - min(v[1] for v in bound_box)
@@ -654,7 +677,7 @@ def apply_asset_labels(properties, passed_data_overlays_config, camera=None):
             collection=label_collection
         )
 
-    print("  Finished generating exact backing cards.")
+    print("\n  Finished generating exact backing cards.")
 
 
 # ------------------------------------------------------------------
