@@ -24,6 +24,8 @@ color_ramp_config = globals().get('color_ramp', {})
 flyover_config = globals().get('flyover_config', {})
 clean_up_frames = flyover_config.get('clean_up_frames', False)
 
+# Try to get speed; if not present, fall back to frames
+FLYOVER_SPEED    = flyover_config.get('speed', None) 
 FLYOVER_FRAMES   = flyover_config.get('frames', 60) 
 HOLD_FRAMES      = flyover_config.get('hold_frames', 12)
 FRAMES_PER_SEC   = flyover_config.get('fps', 24)
@@ -76,17 +78,46 @@ def render_flyover_frames(render_cam_obj, cameras, layer_name, properties):
     
     num_cameras = len(cameras)
     num_segments = num_cameras - 1
-    total_flyover_frames = FLYOVER_FRAMES * num_segments
-    total_frames = HOLD_FRAMES + total_flyover_frames + HOLD_FRAMES
     frame_paths = []
 
+    # Extract transforms
     transforms = []
     for cam in cameras:
         mat = cam.matrix_world.copy()
         transforms.append((mat.to_translation(), mat.to_quaternion()))
 
+    # --- Conditional Logic: Speed vs. Frames ---
+    if FLYOVER_SPEED is not None:
+        # Distance-Based Calculation (Constant Speed)
+        segment_distances = []
+        for i in range(num_segments):
+            dist = (transforms[i+1][0] - transforms[i][0]).length
+            segment_distances.append(dist)
+            
+        total_distance = sum(segment_distances)
+        if total_distance == 0: total_distance = 0.0001
+        
+        total_duration_sec = total_distance / FLYOVER_SPEED
+        total_flyover_frames = int(total_duration_sec * FRAMES_PER_SEC)
+        
+        dist_breakpoints = [0.0]
+        current_dist = 0.0
+        for d in segment_distances:
+            current_dist += d
+            dist_breakpoints.append(current_dist / total_distance)
+            
+    else:
+        # Time-Based Calculation (Constant Frames per Segment)
+        total_flyover_frames = FLYOVER_FRAMES * num_segments
+        
+        # Breakpoints are evenly spaced fractions (e.g., 0.0, 0.5, 1.0 for 2 segments)
+        dist_breakpoints = [i / num_segments for i in range(num_segments + 1)]
+
+    # Calculate total frames including holds
+    total_frames = HOLD_FRAMES + total_flyover_frames + HOLD_FRAMES
+
     # Position camera at frame 0 first
-    loc_start, rot_start = transforms[0], transforms[0]  # just use first cam
+    loc_start, rot_start = transforms[0], transforms[0] 
     render_cam_obj.location = transforms[0][0]
     render_cam_obj.rotation_mode = 'QUATERNION'
     render_cam_obj.rotation_quaternion = transforms[0][1]
@@ -108,17 +139,41 @@ def render_flyover_frames(render_cam_obj, cameras, layer_name, properties):
         elif i >= HOLD_FRAMES + total_flyover_frames: raw_t = 1.0
         else: raw_t = (i - HOLD_FRAMES) / total_flyover_frames
 
+        # Global easing applied to the overall timeline
         t_pos_global = ease_in_out(raw_t)
         t_rot_global = ease_in_out(max(0.0, min(1.0, (raw_t - 0.04)))) 
 
-        scaled_pos = t_pos_global * num_segments
-        seg_pos = min(int(scaled_pos), num_segments - 1)
-        local_t_pos = scaled_pos - seg_pos
+        # --- Universal Segment Mapping for Position ---
+        seg_pos = 0
+        local_t_pos = 0.0
+        for s in range(num_segments):
+            if t_pos_global <= dist_breakpoints[s+1]:
+                seg_pos = s
+                segment_t_start = dist_breakpoints[s]
+                segment_t_length = dist_breakpoints[s+1] - segment_t_start
+                if segment_t_length > 0:
+                    local_t_pos = (t_pos_global - segment_t_start) / segment_t_length
+                break
+        else:
+            seg_pos = num_segments - 1
+            local_t_pos = 1.0
 
-        scaled_rot = t_rot_global * num_segments
-        seg_rot = min(int(scaled_rot), num_segments - 1)
-        local_t_rot = scaled_rot - seg_rot
+        # --- Universal Segment Mapping for Rotation ---
+        seg_rot = 0
+        local_t_rot = 0.0
+        for s in range(num_segments):
+            if t_rot_global <= dist_breakpoints[s+1]:
+                seg_rot = s
+                segment_t_start = dist_breakpoints[s]
+                segment_t_length = dist_breakpoints[s+1] - segment_t_start
+                if segment_t_length > 0:
+                    local_t_rot = (t_rot_global - segment_t_start) / segment_t_length
+                break
+        else:
+            seg_rot = num_segments - 1
+            local_t_rot = 1.0
 
+        # Apply transforms
         loc_start, _ = transforms[seg_pos]
         loc_end, _   = transforms[seg_pos + 1]
         _, rot_start = transforms[seg_rot]
