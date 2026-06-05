@@ -123,7 +123,13 @@ def apply_building_flood_colors(properties, passed_config, color_ramp_config, sc
     material_cache = {}
     colored_count  = 0
 
-    target_objects = [obj for obj in bpy.data.objects if obj.type == 'MESH' and 'dem' not in obj.name.lower()]
+    target_objects = [
+        obj for obj in bpy.data.objects 
+        if obj.type == 'MESH' 
+        and 'dem' not in obj.name.lower()
+        and not obj.name.startswith("Ring_") 
+        and not obj.name.startswith("Card_")
+    ]
     total_objs = len(target_objects)
 
     print(f"  Coloring Buildings ({scenario})...")
@@ -239,7 +245,13 @@ def apply_asset_rings(properties):
     base_torus_mesh = bpy.context.active_object.data
     bpy.data.objects.remove(bpy.context.active_object, do_unlink=True)
 
-    target_objects = [obj for obj in bpy.data.objects if obj.type == 'MESH' and 'dem' not in obj.name.lower()]
+    target_objects = [
+        obj for obj in bpy.data.objects 
+        if obj.type == 'MESH' 
+        and 'dem' not in obj.name.lower()
+        and not obj.name.startswith("Ring_") 
+        and not obj.name.startswith("Card_")
+    ]
     total_objs = len(target_objects)
 
     print("  Generating Asset Rings...")
@@ -252,7 +264,8 @@ def apply_asset_rings(properties):
         props = properties.get(obj.name, {})
         ca_id = obj.get('CA_ID') or props.get('CA_ID') or obj.get('HighTideID') or props.get('HighTideID')
         ca_class = obj.get('CA_Class') or props.get('CA_Class') or obj.get('AssetClass') or props.get('AssetClass')
-        
+        if ca_class == 'NCH':
+            continue
         if not ca_id or not ca_class or f"Ring_{obj.name}" in bpy.data.objects:
             continue
 
@@ -577,7 +590,13 @@ def apply_asset_labels(properties, passed_data_overlays_config, camera=None):
     placed_labels   = []
     label_count     = 0
 
-    target_objects = [obj for obj in bpy.data.objects if obj.type == 'MESH' and 'dem' not in obj.name.lower()]
+    target_objects = [
+        obj for obj in bpy.data.objects 
+        if obj.type == 'MESH' 
+        and 'dem' not in obj.name.lower()
+        and not obj.name.startswith("Ring_") 
+        and not obj.name.startswith("Card_")
+    ]
     text_objects_to_back = []
     total_objs = len(target_objects)
 
@@ -595,7 +614,8 @@ def apply_asset_labels(properties, passed_data_overlays_config, camera=None):
 
         ca_name  = obj.get('CA_Name') or props.get('CA_Name') or obj.get('AssetName') or props.get('AssetName') or 'Unnamed Asset'
         ca_class = obj.get('CA_Class') or props.get('CA_Class') or obj.get('AssetClass') or props.get('AssetClass') or 'default'
-
+        if ca_class == 'NCH':
+            continue
         top_pos   = get_building_top_center(obj)
         target_x, target_y = top_pos[0], top_pos[1]
         current_z = top_pos[2] + height_offset
