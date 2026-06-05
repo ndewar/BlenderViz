@@ -227,6 +227,7 @@ def apply_asset_rings(properties):
 
     glow_strength = config.get('glow_strength', 10.0)
     ring_height   = config.get('ring_height', 1.0)
+    minor_rad     = ring_height / 2.0  # This is the actual thickness of the ring
     max_distance  = data_overlays_config.get('asset_labels', {}).get('max_distance', 2000.0)
     class_colors  = config['class_colors']
 
@@ -235,16 +236,10 @@ def apply_asset_rings(properties):
         bpy.context.scene.collection.children.link(ring_collection)
 
     material_cache = {}
+    torus_mesh_cache = {}  # Cache meshes based on rounded size to save RAM
     ring_count     = 0
 
-    temp_mesh = bpy.data.meshes.new("BaseRingMesh")
-    temp_obj = bpy.data.objects.new("TempTorus", temp_mesh)
-    bpy.context.collection.objects.link(temp_obj)
-    bpy.context.view_layer.objects.active = temp_obj
-    bpy.ops.mesh.primitive_torus_add(major_radius=1.0, minor_radius=ring_height / 2, major_segments=48, minor_segments=12)
-    base_torus_mesh = bpy.context.active_object.data
-    bpy.data.objects.remove(bpy.context.active_object, do_unlink=True)
-
+    # Ensure we don't accidentally process previously generated rings/cards
     target_objects = [
         obj for obj in bpy.data.objects 
         if obj.type == 'MESH' 
@@ -257,7 +252,6 @@ def apply_asset_rings(properties):
     print("  Generating Asset Rings...")
     for i, obj in enumerate(target_objects):
         
-        # --- Built-in Progress Tracker ---
         if i % 50 == 0 or i == total_objs - 1:
             print(f"\r    Progress: {i+1}/{total_objs} ({(i+1)/total_objs*100:.1f}%)", end="", flush=True)
             
@@ -268,19 +262,36 @@ def apply_asset_rings(properties):
             continue
         if not ca_id or not ca_class or f"Ring_{obj.name}" in bpy.data.objects:
             continue
-
+        
         color = class_colors.get(ca_class, class_colors.get('default', [1.0, 1.0, 1.0]))
         mat_name = f"RingMaterial_{ca_class.replace(' ', '_')}"
         if mat_name not in material_cache:
             material_cache[mat_name] = create_ring_material(mat_name, color, glow_strength)
 
         base_pos = get_building_base_center(obj)
-        radius   = get_building_footprint_radius(obj)
-        hover_z  = base_pos[2] + (ring_height / 2) + 0.5
+        exact_radius = get_building_footprint_radius(obj)
+        hover_z  = base_pos[2] + minor_rad + 0.5
 
-        ring_obj = bpy.data.objects.new(f"Ring_{obj.name}", base_torus_mesh)
+        # Round the radius to the nearest 0.5 meters (so we can reuse the same mesh data)
+        rounded_radius = round(exact_radius * 2) / 2.0
+        if rounded_radius < 0.5:
+            rounded_radius = 0.5
+            
+        if rounded_radius not in torus_mesh_cache:
+            torus_mesh_cache[rounded_radius] = generate_torus_mesh(
+                name=f"BaseRingMesh_{rounded_radius}",
+                major_radius=rounded_radius,
+                minor_radius=minor_rad, # Thickness is now completely independent and protected!
+                major_segments=48,
+                minor_segments=12
+            )
+
+        # Create new object pointing to perfectly sized mesh
+        ring_obj = bpy.data.objects.new(f"Ring_{obj.name}", torus_mesh_cache[rounded_radius])
         ring_obj.location = (base_pos[0], base_pos[1], hover_z)
-        ring_obj.scale = (radius, radius, 1.0) 
+        
+        # WE NO LONGER SCALE THE OBJECT. The mesh is natively the exact right size!
+        ring_obj.scale = (1.0, 1.0, 1.0) 
         
         ring_obj['CA_Class']        = ca_class
         ring_obj['CA_Name']         = obj.get('CA_Name') or props.get('CA_Name') or obj.get('AssetName') or props.get('AssetName') or ""
@@ -298,6 +309,36 @@ def apply_asset_rings(properties):
 # ------------------------------------------------------------------
 # Asset labels
 # ------------------------------------------------------------------
+def generate_torus_mesh(name, major_radius, minor_radius, major_segments=48, minor_segments=12):
+    verts = []
+    faces = []
+    
+    # Generate vertices
+    for i in range(major_segments):
+        u = i * 2 * math.pi / major_segments
+        for j in range(minor_segments):
+            v = j * 2 * math.pi / minor_segments
+            
+            x = (major_radius + minor_radius * math.cos(v)) * math.cos(u)
+            y = (major_radius + minor_radius * math.cos(v)) * math.sin(u)
+            z = minor_radius * math.sin(v)
+            verts.append((x, y, z))
+            
+            # Generate faces (quads)
+            next_i = (i + 1) % major_segments
+            next_j = (j + 1) % minor_segments
+            
+            v0 = i * minor_segments + j
+            v1 = next_i * minor_segments + j
+            v2 = next_i * minor_segments + next_j
+            v3 = i * minor_segments + next_j
+            
+            faces.append((v0, v1, v2, v3))
+            
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(verts, [], faces)
+    return mesh
+
 def create_label_backing(name, text_obj, local_w, local_h, padding, material, collection):
     card_w = local_w + (padding * 2)
     
