@@ -621,10 +621,15 @@ def apply_asset_labels(properties, passed_data_overlays_config, camera=None):
     line_materials  = {}
     placed_labels   = []
     label_count     = 0
+    processed_obj   = 0
 
     for obj in bpy.data.objects:
         if obj.type != 'MESH' or 'dem' in obj.name.lower():
             continue
+        
+        processed_obj +=1
+        if processed_obj % 50 == 0:
+            print(f"  Processing {processed_obj} objects so far out of {len(bpy.data.objects)} objects")
 
         # HYBRID LOOKUP
         props = properties.get(obj.name, {})
@@ -634,7 +639,8 @@ def apply_asset_labels(properties, passed_data_overlays_config, camera=None):
 
         ca_name  = obj.get('CA_Name') or props.get('CA_Name') or obj.get('AssetName') or props.get('AssetName') or 'Unnamed Asset'
         ca_class = obj.get('CA_Class') or props.get('CA_Class') or obj.get('AssetClass') or props.get('AssetClass') or 'default'
-
+        if ca_class == 'NCH':
+            continue
         if bpy.data.objects.get(f"Label_{obj.name}"):
             continue
 
