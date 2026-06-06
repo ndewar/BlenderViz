@@ -40,6 +40,8 @@ def process_scenario_name(collection_name):
         collection_name = collection_name.replace('USACE','USACE_2013_High')
     elif 'extremeRainfall_FAR' in collection_name:
         collection_name = collection_name.replace('extremeRainfall_FAR','Extreme_Rainfall_Drain_Flow_Depth')
+    else: # assume its the 100 yr NOAA 2022 demo scenario
+        collection_name = 'NOAA_2022_Intermediate-High_2040_100-year_Event'
     collection_name = collection_name.replace('noFlood','Baseline_No_Flooding').replace('floodmap_','').replace('_3857','').split('_site')[0]
     return collection_name, collection_name.replace('2030_','').replace('2040_','').replace('2050_','').replace('2060_','').replace('2070_','').replace('2080_','').replace('2090_','').replace('2100_','')
 
@@ -143,7 +145,7 @@ def apply_caption(filepath, layer_name, version_num, site_name, site_num, camera
     x1, y1 = margin_x, margin_y
     box1_coords = [x1, y1, x1 + top_box_width + (padding * 2), y1 + top_box_height + (padding * 2)]
     
-    draw.rectangle(box1_coords, fill=(0, 0, 0, 128))
+    draw.rectangle(box1_coords, fill=(0, 0, 0, 255))
     draw.text((x1 + padding, y1 + padding), line1_text, fill=(255, 255, 255, 255), font=font_main)
     # Shift line 2 down by the height of line 1 plus spacing
     draw.text((x1 + padding, y1 + padding + h1 + line_spacing), line2_text, fill=(255, 255, 255, 255), font=font_main)
@@ -159,7 +161,7 @@ def apply_caption(filepath, layer_name, version_num, site_name, site_num, camera
     
     box3_coords = [x3, y3, x3 + w3 + (padding * 2), y3 + h3 + (padding * 2)]
     
-    draw.rectangle(box3_coords, fill=(0, 0, 0, 128))
+    draw.rectangle(box3_coords, fill=(0, 0, 0, 255))
     draw.text((x3 + padding, y3 + padding), line3_text, fill=(255, 255, 255, 255), font=font_small)
     
     # --- 4. Composite and overwrite ---

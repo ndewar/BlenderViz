@@ -99,6 +99,7 @@ def render_flyover_frames(render_cam_obj, cameras, layer_name, properties):
         
         total_duration_sec = total_distance / FLYOVER_SPEED
         total_flyover_frames = int(total_duration_sec * FRAMES_PER_SEC)
+        input(f'With a speed of {FLYOVER_SPEED} and {FRAMES_PER_SEC} frames per second we will be rendering {total_flyover_frames}, ok?')
         
         dist_breakpoints = [0.0]
         current_dist = 0.0
@@ -115,7 +116,7 @@ def render_flyover_frames(render_cam_obj, cameras, layer_name, properties):
 
     # Calculate total frames including holds
     total_frames = HOLD_FRAMES + total_flyover_frames + HOLD_FRAMES
-
+    
     # Position camera at frame 0 first
     loc_start, rot_start = transforms[0], transforms[0] 
     render_cam_obj.location = transforms[0][0]
