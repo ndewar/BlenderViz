@@ -7,6 +7,7 @@ Features:
 3. Splits the master mesh into individual building objects.
 4. Performs a Point-in-Polygon spatial join against the enriched GeoJSON.
 5. Assigns all GeoJSON properties (Asset Classes, Flood Depths) to Blender custom properties.
+6. Clips out buildings outside the defined shapefile domain.
 """
 
 import bpy
@@ -51,6 +52,7 @@ site_num = globals().get('siteNum', 1)
 base_path = f"/Users/noahdewar/Documents/HighTide/data/{state}/counties/{county}/blender/site{site_num}"
 obj_path = globals().get('building_obj_path', f"{base_path}/buildings_3d_blender.obj")
 geojson_path = globals().get('enriched_geojson_path', f"{base_path}/buildings_enriched_Site{site_num}.geojson")
+clip_shapefile_path = f"{base_path}/clipGeom.shp"
 
 print(obj_path)
 print(geojson_path)
@@ -109,6 +111,68 @@ def create_default_material():
             bsdf.inputs['Base Color'].default_value = building_color
             bsdf.inputs['Roughness'].default_value = 0.8
     return mat
+
+
+def load_clip_polygons(clip_path):
+    """Loads the shapefile and returns a list of polygons (lists of coordinates)."""
+    polygons = []
+    if not os.path.exists(clip_path):
+        return polygons
+    
+    # Attempt 1: GeoPandas (Robust, handles CRS internally)
+    try:
+        import geopandas as gpd
+        gdf = gpd.read_file(clip_path)
+        if gdf.crs and gdf.crs.to_epsg() != 3857:
+            gdf = gdf.to_crs(epsg=3857)
+        for geom in gdf.geometry:
+            if geom.geom_type == 'Polygon':
+                polygons.append(list(geom.exterior.coords))
+            elif geom.geom_type == 'MultiPolygon':
+                for poly in geom.geoms:
+                    polygons.append(list(poly.exterior.coords))
+        return polygons
+    except ImportError:
+        pass
+        
+    # Attempt 2: PyShp (shapefile)
+    try:
+        import shapefile
+        sf = shapefile.Reader(clip_path)
+        for shape in sf.shapes():
+            pts = shape.points
+            # Auto-detect if it's in EPSG:4326 (Lat/Lon) and project to 3857
+            if pts and abs(pts[0][0]) <= 180 and HAS_BLENDERGIS:
+                proj_pts = [proj.reprojPt(4326, 3857, p[0], p[1]) for p in pts]
+                polygons.append(proj_pts)
+            else:
+                polygons.append(pts)
+        return polygons
+    except ImportError:
+        print("  [!] 'geopandas' and 'pyshp' modules not found. Cannot clip buildings.")
+        return []
+
+
+def point_in_polygon(x, y, polygon):
+    """
+    Ray-casting algorithm to determine if a 2D point is inside a 2D polygon.
+    Polygon is a list of [x, y] coordinate pairs.
+    """
+    n = len(polygon)
+    inside = False
+    p1x, p1y = polygon[0]
+    for i in range(n + 1):
+        p2x, p2y = polygon[i % n]
+        if y > min(p1y, p2y):
+            if y <= max(p1y, p2y):
+                if x <= max(p1x, p2x):
+                    if p1y != p2y:
+                        xints = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
+                    if p1x == p2x or x <= xints:
+                        inside = not inside
+        p1x, p1y = p2x, p2y
+    return inside
+
 
 def ground_buildings_to_dem(buildings):
     """
@@ -174,26 +238,6 @@ def ground_buildings_to_dem(buildings):
             grounded_count += 1
             
     print(f"  Successfully grounded {grounded_count} buildings.")
-
-def point_in_polygon(x, y, polygon):
-    """
-    Ray-casting algorithm to determine if a 2D point is inside a 2D polygon.
-    Polygon is a list of [x, y] coordinate pairs.
-    """
-    n = len(polygon)
-    inside = False
-    p1x, p1y = polygon[0]
-    for i in range(n + 1):
-        p2x, p2y = polygon[i % n]
-        if y > min(p1y, p2y):
-            if y <= max(p1y, p2y):
-                if x <= max(p1x, p2x):
-                    if p1y != p2y:
-                        xints = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
-                    if p1x == p2x or x <= xints:
-                        inside = not inside
-        p1x, p1y = p2x, p2y
-    return inside
 
 
 def spatial_join_properties(buildings, geojson_path):
@@ -344,12 +388,48 @@ def import_master_mesh():
     print("  Splitting mesh into individual buildings...")
     bpy.ops.mesh.separate(type='LOOSE')
 
-    # All resulting buildings are now actively selected
-    buildings = bpy.context.selected_objects
+    # Force selection to a standard list to avoid context issues during deletion
+    buildings = list(bpy.context.selected_objects)
     print(f"    Split into {len(buildings)} individual buildings.")
+
+    # 4.5. Clip out buildings outside the domain
+    clip_polys = load_clip_polygons(clip_shapefile_path)
+    if clip_polys:
+        print(f"  Clipping buildings to domain using {clip_shapefile_path}...")
+        valid_buildings = []
+        removed_count = 0
+        
+        for obj in buildings:
+            # Check center against all polygons in the shapefile
+            world_x = (obj.location.x * scene_scale) + scene_ox
+            world_y = (obj.location.y * scene_scale) + scene_oy
+            
+            is_inside = False
+            for poly in clip_polys:
+                if point_in_polygon(world_x, world_y, poly):
+                    is_inside = True
+                    break
+            
+            if is_inside:
+                valid_buildings.append(obj)
+            else:
+                # Delete the building entirely from the Blender scene
+                bpy.data.objects.remove(obj, do_unlink=True)
+                removed_count += 1
+                
+        buildings = valid_buildings
+        print(f"    Removed {removed_count} buildings outside the domain. {len(buildings)} remaining.")
+    elif os.path.exists(clip_shapefile_path):
+        print("  [!] Clip geometry found but could not be parsed. Skipping clipping step.")
+    else:
+        print("  [i] No clipGeom.shp found in base_path. Skipping clipping step.")
 
     # 5. Set Origin to Geometry Bounds for every building
     print("  Centering origins for all buildings...")
+    bpy.ops.object.select_all(action='DESELECT')
+    for obj in buildings:
+        obj.select_set(True)
+    bpy.context.view_layer.objects.active = buildings[0] if buildings else None
     bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='BOUNDS')
 
     # --- NEW: Ground the buildings to the DEM ---
@@ -382,4 +462,9 @@ def import_master_mesh():
 
     print("--- Master Building Import Complete ---\n")
 
-import_master_mesh()
+# Main Execution Trigger
+if globals().get('run_import', True):
+    print("\n[DEBUG] Pipeline trigger detected. Starting import process...")
+    import_master_mesh()
+else:
+    print("\n[DEBUG] 'run_import' was False. Skipping building import.")
