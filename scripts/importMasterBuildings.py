@@ -113,46 +113,6 @@ def create_default_material():
     return mat
 
 
-def load_clip_polygons(clip_path):
-    """Loads the shapefile and returns a list of polygons (lists of coordinates)."""
-    polygons = []
-    if not os.path.exists(clip_path):
-        return polygons
-    
-    # Attempt 1: GeoPandas (Robust, handles CRS internally)
-    try:
-        import geopandas as gpd
-        gdf = gpd.read_file(clip_path)
-        if gdf.crs and gdf.crs.to_epsg() != 3857:
-            gdf = gdf.to_crs(epsg=3857)
-        for geom in gdf.geometry:
-            if geom.geom_type == 'Polygon':
-                polygons.append(list(geom.exterior.coords))
-            elif geom.geom_type == 'MultiPolygon':
-                for poly in geom.geoms:
-                    polygons.append(list(poly.exterior.coords))
-        return polygons
-    except ImportError:
-        pass
-        
-    # Attempt 2: PyShp (shapefile)
-    try:
-        import shapefile
-        sf = shapefile.Reader(clip_path)
-        for shape in sf.shapes():
-            pts = shape.points
-            # Auto-detect if it's in EPSG:4326 (Lat/Lon) and project to 3857
-            if pts and abs(pts[0][0]) <= 180 and HAS_BLENDERGIS:
-                proj_pts = [proj.reprojPt(4326, 3857, p[0], p[1]) for p in pts]
-                polygons.append(proj_pts)
-            else:
-                polygons.append(pts)
-        return polygons
-    except ImportError:
-        print("  [!] 'geopandas' and 'pyshp' modules not found. Cannot clip buildings.")
-        return []
-
-
 def point_in_polygon(x, y, polygon):
     """
     Ray-casting algorithm to determine if a 2D point is inside a 2D polygon.
@@ -243,7 +203,7 @@ def ground_buildings_to_dem(buildings):
 def spatial_join_properties(buildings, geojson_path):
     """
     Mathematically match each Blender building to its GeoJSON footprint 
-    and copy the properties over.
+    and copy the properties over. Deletes any building not found in the GeoJSON.
     """
     print(f"\n  Starting Spatial Join with: {geojson_path}")
     if not os.path.exists(geojson_path):
@@ -258,11 +218,13 @@ def spatial_join_properties(buildings, geojson_path):
 
     scene_ox, scene_oy, scene_scale = get_scene_origin()
     match_count = 0
+    removed_count = 0
 
     # Ensure all objects have updated transforms before measuring locations
     bpy.context.view_layer.update()
 
-    for obj in buildings:
+    # Wrap in list() so we don't break the loop when we delete objects
+    for obj in list(buildings):
         if obj.type != 'MESH':
             continue
 
@@ -291,7 +253,7 @@ def spatial_join_properties(buildings, geojson_path):
                         is_inside = True
                         break
             
-            # 3. If matched, copy all properties and break the loop to save time!
+            # 3. If matched, copy all properties and break the loop
             if is_inside:
                 props = feature.get("properties", {})
                 
@@ -308,11 +270,13 @@ def spatial_join_properties(buildings, geojson_path):
                 found_match = True
                 break
         
+        # --- NEW: Delete the building if it wasn't in the clipped GeoJSON ---
         if not found_match:
-            obj.name = f"Building_Unmatched_{obj.name}"
+            bpy.data.objects.remove(obj, do_unlink=True)
+            removed_count += 1
 
-    print(f"  Spatial Join Complete: Matched {match_count} / {len(buildings)} buildings.")
-
+    print(f"  Spatial Join Complete: Matched {match_count} buildings. Deleted {removed_count} out-of-bounds buildings.")
+    
 
 def import_master_mesh():
     """Imports, projects, splits, and formats the Master OBJ."""
@@ -391,38 +355,6 @@ def import_master_mesh():
     # Force selection to a standard list to avoid context issues during deletion
     buildings = list(bpy.context.selected_objects)
     print(f"    Split into {len(buildings)} individual buildings.")
-
-    # 4.5. Clip out buildings outside the domain
-    clip_polys = load_clip_polygons(clip_shapefile_path)
-    if clip_polys:
-        print(f"  Clipping buildings to domain using {clip_shapefile_path}...")
-        valid_buildings = []
-        removed_count = 0
-        
-        for obj in buildings:
-            # Check center against all polygons in the shapefile
-            world_x = (obj.location.x * scene_scale) + scene_ox
-            world_y = (obj.location.y * scene_scale) + scene_oy
-            
-            is_inside = False
-            for poly in clip_polys:
-                if point_in_polygon(world_x, world_y, poly):
-                    is_inside = True
-                    break
-            
-            if is_inside:
-                valid_buildings.append(obj)
-            else:
-                # Delete the building entirely from the Blender scene
-                bpy.data.objects.remove(obj, do_unlink=True)
-                removed_count += 1
-                
-        buildings = valid_buildings
-        print(f"    Removed {removed_count} buildings outside the domain. {len(buildings)} remaining.")
-    elif os.path.exists(clip_shapefile_path):
-        print("  [!] Clip geometry found but could not be parsed. Skipping clipping step.")
-    else:
-        print("  [i] No clipGeom.shp found in base_path. Skipping clipping step.")
 
     # 5. Set Origin to Geometry Bounds for every building
     print("  Centering origins for all buildings...")
