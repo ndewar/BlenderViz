@@ -16,6 +16,7 @@ font_path = globals()['font_path']
 version_num = globals().get('versionNum', 1)
 state = globals().get('state', 'florida')
 county = globals().get('county', 'brevard')
+project_name = globals().get('project_name')
 update_flag = globals().get('update_flag', True)
 data_overlays_config = globals().get('data_overlays', {})
 color_ramp_config = globals().get('color_ramp', {})
@@ -24,7 +25,7 @@ flood_rasters = [name for name in existing_object_names if 'floodmap' in name.lo
 collection_names = ['noFlood'] + flood_rasters
 
 camera_names = ["Camera1", "Camera2"] 
-output_directory = f"/Users/noahdewar/Documents/HighTide/data/{state}/counties/{county}/blender/renders/v{version_num}/site{site_num}/"
+output_directory = f"/Users/noahdewar/Documents/HighTide/data/{state}/projects/{project_name}/blender/renders/v{version_num}/site{site_num}/"
 image_format = 'PNG'
 
 def setup_render_settings():
@@ -56,7 +57,7 @@ def render_and_save(collection_name, camera_name, update_flag=True):
     
     print(f"Rendering: Collection '{collection_name}', Camera '{camera_name}'")
     bpy.context.view_layer.update()
-    bpy.ops.wm.save_as_mainfile(filepath=os.path.join(output_directory, "DEBUG_PRE_RENDER.blend"))
+    #bpy.ops.wm.save_as_mainfile(filepath=os.path.join(output_directory, "DEBUG_PRE_RENDER.blend"))
     bpy.ops.render.render(write_still=True)
 
     # 2. Force a full Depsgraph rebuild by "scrubbing" the timeline

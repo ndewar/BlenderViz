@@ -156,7 +156,7 @@ def safe_clean_scene():
 
 def apply_render_settings(scene):
     scene.render.engine = 'CYCLES'
-    scene.cycles.samples = 32
+    scene.cycles.samples = 124
     scene.cycles.use_adaptive_sampling = True
     scene.cycles.adaptive_threshold = 0.01 
     scene.cycles.preview_samples = 32
@@ -168,8 +168,8 @@ def set_viewport_clipping():
                 if space.type == 'VIEW_3D':
                     space.clip_end = 1000000
 
-def get_existing_flood_rasters(state, county, site_num, restrict_import):
-    folder_path = f'/Users/noahdewar/Documents/HighTide/data/{state}/counties/{county}/blender/site{site_num}/'
+def get_existing_flood_rasters(state, project_name, site_num, restrict_import):
+    folder_path = f'/Users/noahdewar/Documents/HighTide/data/{state}/projects/{project_name}/blender/site{site_num}/'
     existing_objects = set(bpy.data.objects.keys())
     present, missing = set(), set()
 
@@ -210,6 +210,7 @@ def build_shared_context(state, county, site_num, site_config, is_existing):
         #'font_path': '/Users/noahdewar/Documents/HighTide/platform/src/assets/fonts/newOrder/NewOrder-Bold.ttf',
         'font_path': '/System/Library/Fonts/Helvetica.ttc',
         'site_name': site_config.get('site_name', f'Site {site_num}'),
+        'project_name': site_config['project_name'],
         'bpy': bpy,
         'os': os,
         'state': state,
@@ -235,7 +236,7 @@ def build_shared_context(state, county, site_num, site_config, is_existing):
 def process_single_site(state, county, site_num, project_name, site_config, is_existing):
     """The unified core logic for building or updating a site."""
     script_dir = "/Users/noahdewar/Documents/HighTide/BlenderViz/scripts/"
-    blend_dir = f"/Users/noahdewar/Documents/HighTide/data/{state}/counties/{county}/blender/site{site_num}/"
+    blend_dir = f"/Users/noahdewar/Documents/HighTide/data/{state}/projects/{project_name}/blender/site{site_num}/"
     blend_path = os.path.join(blend_dir, f"{county}_site{site_num}.blend")
 
     # 1. Setup Scene (Load or Clean)
@@ -257,7 +258,7 @@ def process_single_site(state, county, site_num, project_name, site_config, is_e
 
     # 4. Import Geometry & Materials (The Divergent Step)
     if is_existing:
-        present, missing = get_existing_flood_rasters(state, county, site_num, shared_context['restrict_import'])
+        present, missing = get_existing_flood_rasters(state, project_name, site_num, shared_context['restrict_import'])
         print(f"Rasters already in scene: {present}\nRasters to import: {missing}")
         if missing:
             run_external_script(script_dir, "importRasters.py", shared_context)
@@ -377,6 +378,7 @@ def run_pipeline_dispatcher():
         # Merge top-level configs into site_config
         site_config['data_overlays'] = top_level_data_overlays
         site_config['color_ramp'] = top_level_color_ramp
+        site_config['project_name'] = project_name
 
         process_single_site(state, county, site_num, project_name, site_config, is_existing)
 

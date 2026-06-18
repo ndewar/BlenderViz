@@ -15,16 +15,18 @@ import json
 import math
 import mathutils
 import bmesh
+import re
 
 # --- Configuration ---
-state                = globals().get('state', 'florida')
-county               = globals().get('county', 'brevard')
-site_num             = globals().get('siteNum', 1)
+state                = globals().get('state')
+county               = globals().get('county')
+site_num             = globals().get('siteNum')
+project_name         = globals().get('project_name')
 data_overlays_config = globals().get('data_overlays', {})
 color_ramp_config    = globals().get('color_ramp', {})
 flood_scenario       = globals().get('flood_scenario', None)
 
-default_properties_path = f"/Users/noahdewar/Documents/HighTide/data/{state}/counties/{county}/blender/site{site_num}/multipatch_properties_Site{site_num}.json"
+default_properties_path = f"/Users/noahdewar/Documents/HighTide/data/{state}/projects/{project_name}/blender/site{site_num}/multipatch_properties_Site{site_num}.json"
 properties_path = data_overlays_config.get('properties_path', 'auto')
 if properties_path == 'auto':
     properties_path = default_properties_path
@@ -34,12 +36,47 @@ if properties_path == 'auto':
 # Utilities
 # ------------------------------------------------------------------
 
-def load_properties():
+def robust_get_props(properties, obj):
+    # 1. Try an exact name match first
+    props = properties.get(obj.name, {})
+    #print(obj)
+    # 2. If empty, try extracting a UUID (handles Blender suffixes like .001)
+    if not props:
+        # Matches the standard 8-4-4-4-12 UUID format
+        uuid_match = re.search(r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}', obj.name)
+        if uuid_match:
+            clean_id = uuid_match.group()
+            
+            # Check both uppercase and lowercase, just in case the JSON dictionary 
+            # formatted the UUID letters differently than Blender did
+            props = properties.get(clean_id, {})
+            if not props:
+                props = properties.get(clean_id.upper(), {})
+            if not props:
+                props = properties.get(clean_id.lower(), {})
+            
+    # 3. If STILL empty, fall back to basic numbers (for older legacy workflows)
+    if not props:
+        num_match = re.search(r'\d+', obj.name)
+        if num_match:
+            clean_id = num_match.group()
+            props = properties.get(clean_id, {})
+            
+    return props
+
+def load_properties(state: str = '', project_name: str = '', site_num: str = ''):
     if not os.path.exists(properties_path):
         print(f"  [!] Properties file not found: {properties_path}")
-        return {}
-    with open(properties_path, 'r') as f:
-        properties = json.load(f)
+        fallback_properties_path = f"/Users/noahdewar/Documents/HighTide/data/{state}/projects/{project_name}/blender/site{site_num}/multipatch_properties_Site{site_num}.json"
+        if not os.path.exists(fallback_properties_path):
+            print(f"  [!] Properties file not found: {fallback_properties_path}")
+            return {}
+        else:
+            with open(fallback_properties_path, 'r') as f:
+                properties = json.load(f)
+    else:
+        with open(properties_path, 'r') as f:
+            properties = json.load(f)
     print(f"  Loaded properties for {len(properties)} objects (Legacy Workflow)")
     return properties
 
@@ -109,7 +146,6 @@ def create_flood_material(name, color):
     mat.node_tree.links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
     return mat
 
-
 def apply_building_flood_colors(properties, passed_config, color_ramp_config, scenario='noFlood'):
     config = passed_config.get('building_flood_colors', {})
     if not config.get('enabled', False):
@@ -139,7 +175,8 @@ def apply_building_flood_colors(properties, passed_config, color_ramp_config, sc
         if i % 50 == 0 or i == total_objs - 1:
             print(f"\r    Progress: {i+1}/{total_objs} ({(i+1)/total_objs*100:.1f}%)", end="", flush=True)
             
-        props = properties.get(obj.name, {})
+        props = robust_get_props(properties, obj)
+            
         raw_depth = obj.get(scenario)
         if raw_depth is None:
             raw_depth = props.get(scenario)
@@ -163,7 +200,6 @@ def apply_building_flood_colors(properties, passed_config, color_ramp_config, sc
         colored_count += 1
 
     print(f"\n  Colored {colored_count} buildings for scenario '{scenario}'")
-
 # ------------------------------------------------------------------
 # Asset rings
 # ------------------------------------------------------------------
@@ -255,10 +291,17 @@ def apply_asset_rings(properties):
         if i % 50 == 0 or i == total_objs - 1:
             print(f"\r    Progress: {i+1}/{total_objs} ({(i+1)/total_objs*100:.1f}%)", end="", flush=True)
             
-        props = properties.get(obj.name, {})
-        ca_id = obj.get('CA_ID') or props.get('CA_ID') or obj.get('HighTideID') or props.get('HighTideID')
+        # --- NEW: Robust UUID & Legacy Property Lookup ---
+        props = robust_get_props(properties, obj)
+        
+        # 4. Expanded fallback list for legacy column names
+        ca_id = (
+            obj.get('CA_ID') or props.get('CA_ID') or 
+            obj.get('HighTideID') or props.get('HighTideID') or
+            props.get('Asset_ID')
+        )
         ca_class = obj.get('CA_Class') or props.get('CA_Class') or obj.get('AssetClass') or props.get('AssetClass')
-        if ca_class == 'NCH':
+        if ca_class == 'NCH' and project_name == 'FloridaDemo_Internal_2026':
             continue
         if not ca_id or not ca_class or f"Ring_{obj.name}" in bpy.data.objects:
             continue
@@ -642,21 +685,31 @@ def apply_asset_labels(properties, passed_data_overlays_config, camera=None):
     total_objs = len(target_objects)
 
     print("  Generating Labels (Pass 1)...")
+    #print(properties)
     for i, obj in enumerate(target_objects):
         
         # --- Built-in Progress Tracker ---
         if i % 50 == 0 or i == total_objs - 1:
             print(f"\r    Progress: {i+1}/{total_objs} ({(i+1)/total_objs*100:.1f}%)", end="", flush=True)
             
-        props = properties.get(obj.name, {})
-        ca_id = obj.get('CA_ID') or props.get('CA_ID') or obj.get('HighTideID') or props.get('HighTideID')
-        if not ca_id or f"Label_{obj.name}" in bpy.data.objects:
+        # --- NEW: Robust UUID & Legacy Property Lookup ---
+        props = robust_get_props(properties, obj)
+
+        # 4. Expanded fallback list for legacy column names
+        ca_id = (
+            obj.get('CA_ID') or props.get('CA_ID') or 
+            obj.get('HighTideID') or props.get('HighTideID') or
+            props.get('ID') or props.get('OBJECTID') or
+            props.get('Asset_ID')
+        )
+        ca_name  = obj.get('CA_Name') or props.get('CA_Name') or obj.get('AssetName') or props.get('AssetName')
+        ca_class = obj.get('CA_Class') or props.get('CA_Class') or obj.get('AssetClass') or props.get('AssetClass')
+        if not ca_id or not ca_class or f"Label_{obj.name}" in bpy.data.objects:
             continue
 
-        ca_name  = obj.get('CA_Name') or props.get('CA_Name') or obj.get('AssetName') or props.get('AssetName') or 'Unnamed Asset'
-        ca_class = obj.get('CA_Class') or props.get('CA_Class') or obj.get('AssetClass') or props.get('AssetClass') or 'default'
-        if ca_class == 'NCH':
+        if ca_class == 'NCH' and project_name == 'FloridaDemo_Internal_2026':
             continue
+            
         top_pos   = get_building_top_center(obj)
         target_x, target_y = top_pos[0], top_pos[1]
         current_z = top_pos[2] + height_offset
@@ -739,7 +792,6 @@ def apply_asset_labels(properties, passed_data_overlays_config, camera=None):
         )
 
     print("\n  Finished generating exact backing cards.")
-
 
 # ------------------------------------------------------------------
 # Dynamic visibility
@@ -885,10 +937,14 @@ def register_visibility_handlers():
 # Main execution
 # ------------------------------------------------------------------
 
-if data_overlays_config.get('enabled', False):
+def main():
+    if not data_overlays_config.get('enabled', False):
+        print("  Data overlays disabled")
+        return
+
     print("\n--- Applying Data Overlays ---")
 
-    # Load properties (Handles legacy ESRI multipatch workflow if present)
+    # Now 'properties', 'key', 'guid', and 'clean' are local to this function!
     properties = load_properties()
     for key in list(properties.keys()):
         guid = properties[key].get('GlobalID', '')
@@ -896,12 +952,15 @@ if data_overlays_config.get('enabled', False):
             clean = guid.lstrip('{').rstrip('}')
             properties[clean] = properties[key]
 
-    # Pass the dictionary in. Functions will prioritize Native Custom Properties first.
     apply_building_flood_colors(properties, data_overlays_config, color_ramp_config, flood_scenario)
     apply_asset_labels(properties, data_overlays_config)
     apply_asset_rings(properties)
     register_visibility_handlers()
 
     print("--- Data Overlays Complete ---\n")
-else:
-    print("  Data overlays disabled")
+
+# Run the protected scope
+main()
+
+# Optional: Clean up the main function itself from the context when done
+del main

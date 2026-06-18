@@ -2,13 +2,16 @@ import bpy
 import os
 
 # 1. Variables (Passed from Master Runner)
-state = globals().get('state', 'florida')
-county = globals().get('county', 'brevard')
-siteNum = globals().get('siteNum', 1)
+state = globals().get('state')
+county = globals().get('county')
+project_name = globals().get('project_name')
+siteNum = globals().get('siteNum')
+if not state or county or project_name or siteNum:
+    raise Exception(f'One of state: {state}, county: {county}, project_name: {project_name}, or site number: {siteNum}, is undefined...')
 
 # 2. Path to your Shapefile
 # Update this path to where your shapefiles are stored
-shp_path = f"//Users/noahdewar/Documents/HighTide/data/{state}/counties/{county}/blender/site{siteNum}/finalBuildings_Site{siteNum}_3857.shp"
+shp_path = f"/Users/noahdewar/Documents/HighTide/data/{state}/projects/{project_name}/blender/site{siteNum}/finalBuildings_Site{siteNum}_3857.shp"
 
 def import_and_extrude_shp(filepath):
     if not os.path.exists(filepath):

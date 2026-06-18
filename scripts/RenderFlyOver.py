@@ -19,19 +19,27 @@ font_path = globals()['font_path']
 version_num = globals().get('versionNum', 1)
 state = globals().get('state', 'florida')
 county = globals().get('county', 'brevard')
+project_name = globals().get('project_name')
 data_overlays_config = globals().get('data_overlays', {})
 color_ramp_config = globals().get('color_ramp', {})
 flyover_config = globals().get('flyover_config', {})
 clean_up_frames = flyover_config.get('clean_up_frames', False)
+
+addDataOverlays.state                = globals().get('state', 'florida')
+addDataOverlays.county               = globals().get('county', 'brevard')
+addDataOverlays.site_num             = globals().get('siteNum', 1)
+addDataOverlays.project_name         = globals().get('project_name')
+addDataOverlays.data_overlays_config = globals().get('data_overlays', {})
+addDataOverlays.color_ramp_config    = globals().get('color_ramp', {})
 
 # Try to get speed; if not present, fall back to frames
 FLYOVER_SPEED    = flyover_config.get('speed', None) 
 FLYOVER_FRAMES   = flyover_config.get('frames', 60) 
 HOLD_FRAMES      = flyover_config.get('hold_frames', 12)
 FRAMES_PER_SEC   = flyover_config.get('fps', 24)
-
+print(globals())
 output_directory = os.path.join(
-    f"/Users/noahdewar/Documents/HighTide/data/{state}/counties/{county}/blender/renders/v{version_num}/site{site_num}/flyover/"
+    f"/Users/noahdewar/Documents/HighTide/data/{state}/projects/{project_name}/blender/renders/v{version_num}/site{site_num}/flyover/"
 )
 
 def ease_in_out(t):
@@ -233,7 +241,7 @@ else:
     mp_properties = {}
     if globals().get('data_overlays', {}).get('enabled', False):
         import addDataOverlays
-        mp_properties = addDataOverlays.load_properties()
+        mp_properties = addDataOverlays.load_properties(state=state,project_name=project_name,site_num=site_num)
         for key in list(mp_properties.keys()):
             guid = mp_properties[key].get('GlobalID', '')
             if guid:

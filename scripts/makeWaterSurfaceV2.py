@@ -236,13 +236,14 @@ data_overlays = globals().get('data_overlays', {})
 color_ramp = globals().get('color_ramp', {})
 state = globals().get('state', 'florida')
 county = globals().get('county', 'brevard')
+project_name = globals().get('project_name')
 siteNum = globals().get('siteNum', 1)
 
 # Check if flood raster depth coloring is enabled
 flood_raster_depth_enabled = data_overlays.get('flood_raster_depth_coloring', {}).get('enabled', False)
 
 # Build folder path for depth textures
-folder_path = f"/Users/noahdewar/Documents/HighTide/data/{state}/counties/{county}/blender/site{siteNum}/"
+folder_path = f"/Users/noahdewar/Documents/HighTide/data/{state}/projects/{project_name}/blender/site{siteNum}/"
 
 print("\n--- Starting Water Material Setup ---")
 print(f"  Flood raster depth coloring: {'enabled' if flood_raster_depth_enabled else 'disabled'}")

@@ -47,9 +47,10 @@ else:
 state = globals().get('state', 'florida')
 county = globals().get('county', 'brevard')
 site_num = globals().get('siteNum', 1)
+project_name = globals().get('project_name')
 
 # Paths
-base_path = f"/Users/noahdewar/Documents/HighTide/data/{state}/counties/{county}/blender/site{site_num}"
+base_path = f"/Users/noahdewar/Documents/HighTide/data/{state}/projects/{project_name}/blender/site{site_num}"
 obj_path = globals().get('building_obj_path', f"{base_path}/buildings_3d_blender.obj")
 geojson_path = globals().get('enriched_geojson_path', f"{base_path}/buildings_enriched_Site{site_num}.geojson")
 clip_shapefile_path = f"{base_path}/clipGeom.shp"
