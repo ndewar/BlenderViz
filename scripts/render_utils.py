@@ -7,6 +7,7 @@ import importlib
 from concurrent.futures import ThreadPoolExecutor
 import functools
 from datetime import date
+import re
 
 # 1. Force Blender to recognize the Mac user's Python packages directory
 user_site = site.getusersitepackages()
@@ -40,6 +41,11 @@ def process_scenario_name(collection_name):
         collection_name = collection_name.replace('USACE','USACE_2013_High')
     elif 'extremeRainfall_FAR' in collection_name:
         collection_name = collection_name.replace('extremeRainfall_FAR','Extreme_Rainfall_Drain_Flow_Depth')
+    elif any(re.match(r'\d+\.\d+', part) for part in collection_name.split('_')):
+        match = re.search(r'\d+\.\d+', collection_name)
+        collection_name = f'Storm_surge_{match.group()}'
+    # check if a number with a decimal like 3.45 is in one of the bits of the collection name if we split on _
+    # use regex to check for any number
     else: # assume its the 100 yr NOAA 2022 demo scenario
         collection_name = 'NOAA_2022_Intermediate-High_2040_100-year_Event'
     collection_name = collection_name.replace('noFlood','Baseline_No_Flooding').replace('floodmap_','').replace('_3857','').split('_site')[0]
