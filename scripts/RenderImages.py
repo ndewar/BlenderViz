@@ -120,7 +120,11 @@ potentialScenarios = ['NOAA_2017_High','NOAA_2017_Intermediate-Low','USACE_2013_
 
 for camera_name in camera_names:
     currFiles = [x for x in filenames if camera_name in x]
-    no_flood_file = [x for x in currFiles if 'Baseline_No_Flooding' in x][0]
+    no_flood_file = [x for x in currFiles if 'Baseline_No_Flooding' in x]
+    if len(no_flood_file) > 0:
+        no_flood_file = no_flood_file[0]
+    else:
+        no_flood_file = '-1'
     scenarios = {tag: [] for tag in potentialScenarios}
     
     for filename in currFiles:
@@ -135,7 +139,8 @@ for camera_name in camera_names:
 
         list_file_path = f"{output_directory}/{camera_name}/list.txt"
         with open(list_file_path, "w") as f:
-            f.write(f"file '{output_directory}/{camera_name}/Baseline_No_Flooding/{no_flood_file}'\nduration 2.0\n")
+            if no_flood_file != '-1':
+                f.write(f"file '{output_directory}/{camera_name}/Baseline_No_Flooding/{no_flood_file}'\nduration 2.0\n")
             for file in sorted_files:
                 f.write(f"file '{output_directory}/{camera_name}/{curr_scenario}/{file}'\nduration 2.0\n")
         
