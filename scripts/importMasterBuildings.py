@@ -580,7 +580,7 @@ def import_master_mesh():
     # ==========================================
     # BRANCH A: JIT DIRECTORY IMPORT
     # ==========================================
-    if os.path.isdir(obj_path):
+    if 1 == 1: #if os.path.isdir(obj_path):
         print("  [!] Directory detected. Switching to Just-In-Time (JIT) batch import...")
         
         rings = load_clip_polygon_rings(clip_shapefile_path)
