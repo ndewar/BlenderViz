@@ -188,8 +188,22 @@ print(results)
         custom_env = os.environ.copy()
         custom_env["PROJ_LIB"] = f"/Users/noahdewar/miniconda3/envs/{env_name}/share/proj"
 
-        result = subprocess.run([python_bin, "-c", script], env=custom_env, capture_output=True, text=True)
+        # THE FIX: Run python without '-c', and pipe the script directly into standard input
+        result = subprocess.run(
+            [python_bin], 
+            input=script, 
+            env=custom_env, 
+            capture_output=True, 
+            text=True
+        )
+        
+        # Check for stderr in case the python script itself crashed
+        if result.returncode != 0:
+            print(f"  [!] Conda Python Error: {result.stderr.strip()}")
+            return None
+            
         return ast.literal_eval(result.stdout.strip())
+        
     except Exception as e:
         print(f"  [!] Batch projection failed: {e}")
         return None
@@ -617,7 +631,8 @@ def import_master_mesh():
                 'obj_path': single_obj_path,
                 'footprint_path': footprint_files[0] if footprint_files else None,
             })
-            
+
+        # not doing this    
         # 2. Project the absolute building locations to EPSG:3857 for the clip check
         print("  Projecting absolute coordinates to EPSG:3857 for spatial clip check...")
         projected_absolute_coords = batch_project_survivors(candidates, source_epsg=3857)
