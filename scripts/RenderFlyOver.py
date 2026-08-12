@@ -22,6 +22,7 @@ county = globals().get('county', 'brevard')
 project_name = globals().get('project_name')
 data_overlays_config = globals().get('data_overlays', {})
 color_ramp_config = globals().get('color_ramp', {})
+depth_to_year = globals().get('flood_maps_to_run', {}).get('depth_to_year',{})
 flyover_config = globals().get('flyover_config', {})
 clean_up_frames = flyover_config.get('clean_up_frames', False)
 
@@ -250,7 +251,7 @@ else:
 
     for layer in flyover_flood_layers:
         # fix layer names and make output filename
-        fixed_layer_name, fixed_layer_name_only_scenario = render_utils.process_scenario_name(layer)
+        fixed_layer_name, fixed_layer_name_only_scenario = render_utils.process_scenario_name(layer, depth_to_year)
         output_name = f"flyover_{fixed_layer_name}_v{version_num}"
 
         # make output paths and folders

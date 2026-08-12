@@ -30,7 +30,9 @@ except ImportError:
         print(f"CRITICAL ERROR: Failed to load Pillow: {e}")
 # ------------------------------------
 
-def process_scenario_name(collection_name):
+def process_scenario_name(collection_name: str, depth_to_year: None | dict = None) -> tuple[str,str]:
+    if depth_to_year is None:
+        depth_to_year = {}
     if 'NOAA' in collection_name:
         collection_name = collection_name.replace('NOAA','NOAA_2017_Intermediate-High')
     elif 'High' in collection_name:
@@ -41,11 +43,18 @@ def process_scenario_name(collection_name):
         collection_name = collection_name.replace('USACE','USACE_2013_High')
     elif 'extremeRainfall_FAR' in collection_name:
         collection_name = collection_name.replace('extremeRainfall_FAR','Extreme_Rainfall_Drain_Flow_Depth')
-    elif any(re.match(r'\d+\.\d+', part) for part in collection_name.split('_')):
-        match = re.search(r'\d+\.\d+', collection_name)
-        collection_name = f'Storm_surge_{match.group()}'
     # check if a number with a decimal like 3.45 is in one of the bits of the collection name if we split on _
     # use regex to check for any number
+    elif any(re.match(r'\d+\.\d+', part) for part in collection_name.split('_')):
+        match = re.search(r'\d+\.\d+', collection_name)
+        if match:
+            year = depth_to_year.get(str(match),None)
+            collection_name = f'NOAA_2022_Intermediate-High_100-year_Event_Storm_Surge_{match.group()}_feet'
+            if year is None:
+                year = depth_to_year.get('fallback_year',date.today().year)
+            collection_name = collection_name + f'_{year}'
+    elif 'noflood' in collection_name.lower():
+        collection_name = 'Baseline_No_Flooding'
     else: # assume its the 100 yr NOAA 2022 demo scenario
         collection_name = 'NOAA_2022_Intermediate-High_2040_100-year_Event'
     collection_name = collection_name.replace('noFlood','Baseline_No_Flooding').replace('floodmap_','').replace('_3857','').split('_site')[0]

@@ -228,6 +228,7 @@ def build_shared_context(state, county, site_num, site_config, is_existing):
         'animate_water': site_config.get('animate_water', True),  # Set to False for static water
         'color_ramp': site_config.get('color_ramp', {}),  # Shared color ramp for depth visualization
         'data_overlays': site_config.get('data_overlays', {}),  # Data overlay settings
+        'flood_maps_to_run': site_config.get('flood_maps_to_run', {}),
         'update_flag': not is_existing,
         "building_obj_path": site_config.get('building_obj_path', ''),
         'flyover_config': flyover_config

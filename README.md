@@ -50,7 +50,7 @@ blender -b -P masterRunner.py -- florida brevard 1 ProjectName
 ```bash
 blender -b -P masterRunner.py -- florida brevard 1,2,3 ProjectName
 blender -b -P masterRunner.py -- florida brevard 7 FloridaDemo_Internal_2026
-blender -b -P masterRunner.py -- florida brevard 4 CapeCav3D_ECFRPC_2025
+blender -b -P masterRunner.py -- florida brevard 4 CapeCav3D_ECFRPC_2025 --existing
 ```
 
 ### Parameters

@@ -20,6 +20,7 @@ project_name = globals().get('project_name')
 update_flag = globals().get('update_flag', True)
 data_overlays_config = globals().get('data_overlays', {})
 color_ramp_config = globals().get('color_ramp', {})
+depth_to_year = globals().get('flood_maps_to_run', {}).get('depth_to_year',{})
 existing_object_names = set(bpy.data.objects.keys())
 flood_rasters = [name for name in existing_object_names if 'floodmap' in name.lower()]
 collection_names = ['noFlood'] + flood_rasters
@@ -42,7 +43,7 @@ def render_and_save(collection_name, camera_name, update_flag=True):
     render_utils.update_labels_for_camera(camera)
 
     print(collection_name)
-    collection_name, collection_name_only_scenario = render_utils.process_scenario_name(collection_name)
+    collection_name, collection_name_only_scenario = render_utils.process_scenario_name(collection_name, depth_to_year)
     print(collection_name)
     bpy.context.scene.camera = camera
     filename = f"{collection_name}_{camera_name}_v{version_num}.{image_format.lower()}"
