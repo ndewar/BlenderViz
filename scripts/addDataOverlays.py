@@ -182,6 +182,17 @@ def apply_building_flood_colors(properties, passed_config, color_ramp_config, sc
             raw_depth = props.get(scenario)
             
         if raw_depth is None or raw_depth < 0.0001:
+            # If previously flooded, reset to white/default
+            if obj.get('flood_depth', 0) > 0 or any(m.name.startswith("FloodDepth_") for m in obj.data.materials if m):
+                obj['flood_depth'] = 0.0
+                obj['scenario']    = scenario
+                
+                mat_name = "FloodDepth_None"
+                if mat_name not in material_cache:
+                    material_cache[mat_name] = create_flood_material(mat_name, (1.0, 1.0, 1.0, 1.0))
+                
+                obj.data.materials.clear()
+                obj.data.materials.append(material_cache[mat_name])
             continue
 
         flood_depth = float(raw_depth or 0)
