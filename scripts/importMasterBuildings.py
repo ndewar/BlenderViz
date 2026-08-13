@@ -22,6 +22,7 @@ import subprocess
 import platform
 import ast
 from pathlib import Path
+import re
 
 # --- Try to dynamically find and load BlenderGIS ---
 HAS_BLENDERGIS = False
@@ -420,15 +421,19 @@ def ground_buildings_to_dem(buildings):
 
 
 def parse_wkt_polygon(wkt_text):
-    """Extracts the exterior ring coordinates from a WKT POLYGON string."""
-    inner = wkt_text.split("((", 1)[1]
-    inner = inner.rsplit("))", 1)[0]
-    exterior_text = inner.split("),(")[0]
-    coords = []
-    for pair in exterior_text.split(","):
-        parts = pair.strip().split()
-        coords.append((float(parts[0]), float(parts[1])))
-    return coords
+    """Exterior ring of the first polygon. Handles POLYGON / MULTIPOLYGON / Z."""
+    if not wkt_text:
+        return []
+    body = re.sub(r'^\s*(MULTI)?POLYGON\s*Z?M?\s*', '', wkt_text.strip(), flags=re.I)
+    m = re.search(r'\(([^()]*)\)', body)   # innermost first group = exterior ring
+    if not m:
+        return []
+    ring = []
+    for pair in m.group(1).split(','):
+        parts = pair.replace('(', ' ').replace(')', ' ').split()
+        if len(parts) >= 2:
+            ring.append((float(parts[0]), float(parts[1])))
+    return ring
 
 
 def polygon_centroid(ring):
@@ -679,8 +684,19 @@ def import_master_mesh():
                 bpy.ops.wm.obj_import(filepath=str(b_path), forward_axis='NEGATIVE_Z', up_axis='Y')
             except AttributeError:
                 bpy.ops.import_scene.obj(filepath=str(b_path), axis_forward='-Z', axis_up='Y')
-                
-            new_obj = bpy.context.selected_objects[0]
+
+            sel = bpy.context.selected_objects
+            if not sel:
+                print(f"  [!] No geometry imported from {b_path.name} - skipping")
+                continue
+
+            new_obj = sel[0]
+            if new_obj.type == 'MESH' and len(new_obj.data.vertices) == 0:
+                print(f"  [!] {b_path.name} has 0 verts - skipping")
+                bpy.data.objects.remove(new_obj, do_unlink=True)
+                bpy.ops.object.select_all(action='DESELECT')
+                continue
+
             bpy.context.view_layer.objects.active = new_obj
             
             # --- THE FIX: Apply the 90-degree import rotation to the mesh ---
