@@ -371,6 +371,7 @@ def run_pipeline_dispatcher():
     # Get top-level config options
     top_level_data_overlays = data.get('data_overlays', {})
     top_level_color_ramp = data.get('color_ramp', {})
+    top_level_flood_maps_to_run = data.get('flood_maps_to_run', {})
 
     for site_num, county in zip(sitesToRun,counties):
         print(f"\n\n{'='*40}\nProcessing Site {site_num}\n{'='*40}")
@@ -379,6 +380,7 @@ def run_pipeline_dispatcher():
         # Merge top-level configs into site_config
         site_config['data_overlays'] = top_level_data_overlays
         site_config['color_ramp'] = top_level_color_ramp
+        site_config['flood_maps_to_run'] = top_level_flood_maps_to_run
         site_config['project_name'] = project_name
 
         process_single_site(state, county, site_num, project_name, site_config, is_existing)

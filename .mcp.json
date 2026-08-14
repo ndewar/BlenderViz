@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "graphrag": {
+      "command": "/Users/noahdewar/miniconda3/envs/kgraph_v1/bin/python",
+      "args": [
+        "/Users/noahdewar/Documents/HighTide/Knowledge-extraction/src/knowledge_parsing/mcp_graphrag.py"
+      ],
+      "env": {
+        "HIGHTIDE_REPO_ROOT": "/Users/noahdewar/Documents/HighTide/BlenderViz"
+      }
+    }
+  }
+}
