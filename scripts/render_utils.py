@@ -48,7 +48,7 @@ def process_scenario_name(collection_name: str, depth_to_year: None | dict = Non
     elif any(re.match(r'\d+\.\d+', part) for part in collection_name.split('_')):
         match = re.search(r'\d+\.\d+', collection_name)
         if match:
-            year = depth_to_year.get(str(match),None)
+            year = depth_to_year.get(match.group(),None)
             collection_name = f'NOAA_2022_Intermediate-High_100-year_Event_Storm_Surge_{match.group()}_feet'
             if year is None:
                 year = depth_to_year.get('fallback_year',date.today().year)
