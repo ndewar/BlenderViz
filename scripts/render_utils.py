@@ -30,9 +30,25 @@ except ImportError:
         print(f"CRITICAL ERROR: Failed to load Pillow: {e}")
 # ------------------------------------
 
+STORM_SURGE_SCENARIO = 'NOAA_2022_Intermediate-High_100-year_Event_Storm_Surge'
+
+def find_depth_token(collection_name: str) -> str | None:
+    """Return the inundation depth in a storm surge layer name ('sanjuan_8.23' -> '8.23').
+
+    A decimal depth means a 100-year event. Only decimals count, so whole-number tokens
+    like the year, site number or EPSG code can't be mistaken for a depth."""
+    for part in collection_name.split('_'):
+        if re.fullmatch(r'\d+\.\d+', part):
+            return part
+    return None
+
 def process_scenario_name(collection_name: str, depth_to_year: None | dict = None) -> tuple[str,str]:
     if depth_to_year is None:
         depth_to_year = {}
+    # Set when the scenario folder differs from the frame name, so that every depth of one
+    # storm surge scenario renders into a single folder instead of one folder per depth.
+    scenario_folder = None
+    depth_token = find_depth_token(collection_name)
     if 'NOAA' in collection_name:
         collection_name = collection_name.replace('NOAA','NOAA_2017_Intermediate-High')
     elif 'High' in collection_name:
@@ -43,22 +59,21 @@ def process_scenario_name(collection_name: str, depth_to_year: None | dict = Non
         collection_name = collection_name.replace('USACE','USACE_2013_High')
     elif 'extremeRainfall_FAR' in collection_name:
         collection_name = collection_name.replace('extremeRainfall_FAR','Extreme_Rainfall_Drain_Flow_Depth')
-    # check if a number with a decimal like 3.45 is in one of the bits of the collection name if we split on _
-    # use regex to check for any number
-    elif any(re.match(r'\d+\.\d+', part) for part in collection_name.split('_')):
-        match = re.search(r'\d+\.\d+', collection_name)
-        if match:
-            year = depth_to_year.get(match.group(),None)
-            collection_name = f'NOAA_2022_Intermediate-High_100-year_Event_Storm_Surge_{match.group()}_feet'
-            if year is None:
-                year = depth_to_year.get('fallback_year',date.today().year)
-            collection_name = collection_name + f'_{year}'
+    # a depth in the layer name (e.g. 'sanjuan_8.23') means a storm surge 100-year event
+    elif depth_token is not None:
+        year = depth_to_year.get(depth_token, None)
+        if year is None:
+            year = depth_to_year.get('fallback_year',date.today().year)
+        scenario_folder = STORM_SURGE_SCENARIO
+        collection_name = f'{scenario_folder}_{depth_token}_feet_{year}'
     elif 'noflood' in collection_name.lower():
         collection_name = 'Baseline_No_Flooding'
     else: # assume its the 100 yr NOAA 2022 demo scenario
         collection_name = 'NOAA_2022_Intermediate-High_2040_100-year_Event'
     collection_name = collection_name.replace('noFlood','Baseline_No_Flooding').replace('floodmap_','').replace('_3857','').split('_site')[0]
-    return collection_name, collection_name.replace('2030_','').replace('2040_','').replace('2050_','').replace('2060_','').replace('2070_','').replace('2080_','').replace('2090_','').replace('2100_','')
+    if scenario_folder is None:
+        scenario_folder = collection_name.replace('2030_','').replace('2040_','').replace('2050_','').replace('2060_','').replace('2070_','').replace('2080_','').replace('2090_','').replace('2100_','')
+    return collection_name, scenario_folder
 
 def update_labels_for_camera(camera):
     """

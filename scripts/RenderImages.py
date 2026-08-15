@@ -1,5 +1,7 @@
 import bpy
 import os
+import re
+import subprocess
 import sys
 
 # --- Import Shared Logic ---
@@ -51,10 +53,10 @@ def render_and_save(collection_name, camera_name, update_flag=True):
     
     if os.path.exists(filepath) and not update_flag:
         print(f"Skipping render: {filepath} already exists")
-        return filename
+        return filepath
     
     bpy.context.scene.render.filepath = filepath
-    os.makedirs(output_directory + f"/{camera_name}/{collection_name.replace('_C1','').replace('2040_','').replace('2070_','').replace('2100_','')}", exist_ok=True)
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
     
     print(f"Rendering: Collection '{collection_name}', Camera '{camera_name}'")
     bpy.context.view_layer.update()
@@ -68,9 +70,9 @@ def render_and_save(collection_name, camera_name, update_flag=True):
     # --- Shared Caption Logic ---
     print(filepath, collection_name, version_num, site_name, site_num, camera_name)
     render_utils.apply_caption(filepath, collection_name, version_num, site_name, site_num, camera_name, font_path)
-    
-    return filename
-    
+
+    return filepath
+
 def flood_rank(name):
     if "noFlood" in name: return 0
     if "2040" in name: return 1
@@ -113,38 +115,79 @@ for collection_name in collection_names:
             # Format the layer name (e.g. 'floodmap_2100_High_C1_site1_3857') to match SCENARIO_FIELD_MAP ('2100_high_c1')
             cam_obj = bpy.data.objects.get(camera_name)  # or whatever your camera name is
             addDataOverlays.apply_asset_labels(mp_properties, data_overlays_config, camera=cam_obj)
-        currFilename = render_and_save(collection_name, camera_name, update_flag)
-        if currFilename:
-            filenames.append(currFilename)
+        currFilepath = render_and_save(collection_name, camera_name, update_flag)
+        if currFilepath:
+            filenames.append(currFilepath)
 
-potentialScenarios = ['NOAA_2017_High','NOAA_2017_Intermediate-Low','USACE_2013_High','NOAA_2017_Intermediate-High']
+# Trailing depth/year on a scenario folder, e.g. '..._Storm_Surge_8.23_feet_2030' or 'Storm_surge_11.25'.
+# Stripping it groups every depth of one scenario into a single animation.
+SCENARIO_DEPTH_SUFFIX = re.compile(r'_\d+(?:\.\d+)?(?:_feet)?(?:_\d{4})?$')
+
+def scenario_dir_of(filepath):
+    return os.path.basename(os.path.dirname(filepath))
+
+def scenario_family(filepath):
+    """Group key for a rendered frame: the scenario minus its depth/year suffix."""
+    scenario = scenario_dir_of(filepath)
+    return SCENARIO_DEPTH_SUFFIX.sub('', scenario) or scenario
+
+def scenario_stem(filepath):
+    """The scenario name as process_scenario_name built it, i.e. the frame filename
+    without its '_Camera1_v3.png' tail."""
+    return re.sub(r'_Camera\d+_v\d+\.\w+$', '', os.path.basename(filepath))
+
+def frame_sort_key(filepath):
+    """Order frames by year, then flood depth. Year leads the scenario name
+    ('2040_NOAA_2017_High') or ends it ('..._Storm_Surge_8.23_feet_2030'); the scenario
+    folder is a fallback for renders made before depths shared one folder."""
+    stem = scenario_stem(filepath)
+    scenario = scenario_dir_of(filepath)
+    year_match = re.match(r'(\d{4})_', stem) or re.search(r'_(\d{4})$', stem) or re.search(r'_(\d{4})$', scenario)
+    depth_match = re.search(r'(\d+(?:\.\d+)?)_feet', stem) or re.search(r'(\d+\.\d+)', scenario)
+    return (
+        int(year_match.group(1)) if year_match else 0,
+        float(depth_match.group(1)) if depth_match else 0.0,
+        flood_rank(stem),
+    )
 
 for camera_name in camera_names:
-    currFiles = [x for x in filenames if camera_name in x]
-    no_flood_file = [x for x in currFiles if 'Baseline_No_Flooding' in x]
-    if len(no_flood_file) > 0:
-        no_flood_file = no_flood_file[0]
-    else:
-        no_flood_file = '-1'
-    scenarios = {tag: [] for tag in potentialScenarios}
-    
-    for filename in currFiles:
-        for tag in potentialScenarios:
-            if tag in filename:
-                scenarios[tag].append(filename)
+    currFiles = [x for x in filenames if camera_name in os.path.basename(x)]
+    no_flood_files = [x for x in currFiles if 'Baseline_No_Flooding' in x]
+    no_flood_file = no_flood_files[0] if no_flood_files else None
+
+    scenarios = {}
+    for filepath in currFiles:
+        if filepath in no_flood_files:
+            continue
+        scenarios.setdefault(scenario_family(filepath), []).append(filepath)
 
     for curr_scenario, files in scenarios.items():
-        if not files: continue
-        sorted_files = sorted(files, key=lambda x: (x.split('_')[1], flood_rank(x)))
-        camera_and_version = 'Camera' + sorted_files[0].split('Camera')[1]
+        sorted_files = sorted(files, key=frame_sort_key)
+        frames = ([no_flood_file] if no_flood_file else []) + sorted_files
+        if len(frames) < 2:
+            print(f"Skipping animation for '{curr_scenario}' ({camera_name}): only {len(frames)} frame")
+            continue
 
-        list_file_path = f"{output_directory}/{camera_name}/list.txt"
+        # Scenarios split across per-depth folders have no folder of their own, so the
+        # animation lands beside them in the camera folder.
+        gif_dir = os.path.join(output_directory, camera_name, curr_scenario)
+        if not os.path.isdir(gif_dir):
+            gif_dir = os.path.join(output_directory, camera_name)
+        gif_path = os.path.join(gif_dir, f"animation_{curr_scenario}_{camera_name}_v{version_num}.gif")
+
+        list_file_path = os.path.join(output_directory, camera_name, "list.txt")
         with open(list_file_path, "w") as f:
-            if no_flood_file != '-1':
-                f.write(f"file '{output_directory}/{camera_name}/Baseline_No_Flooding/{no_flood_file}'\nduration 2.0\n")
-            for file in sorted_files:
-                f.write(f"file '{output_directory}/{camera_name}/{curr_scenario}/{file}'\nduration 2.0\n")
-        
-        commandStr = f'ffmpeg -y -f concat -safe 0 -i {list_file_path} -filter_complex "[0:v]fps=3,split[v1][v2];[v1]palettegen[p];[v2][p]paletteuse" {output_directory}/{camera_name}/{curr_scenario}/animation_{curr_scenario}_{camera_and_version}.gif'
-        os.system(commandStr)    
+            for frame in frames:
+                f.write(f"file '{frame}'\nduration 2.0\n")
+
+        command = [
+            'ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', list_file_path,
+            '-filter_complex', '[0:v]fps=3,split[v1][v2];[v1]palettegen[p];[v2][p]paletteuse',
+            gif_path,
+        ]
+        result = subprocess.run(command)
+        if result.returncode != 0:
+            print(f"ffmpeg failed ({result.returncode}) for '{curr_scenario}' ({camera_name}) - no gif written")
+        else:
+            print(f"Wrote animation: {gif_path} ({len(frames)} frames)")
         os.remove(list_file_path)
