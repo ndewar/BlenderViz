@@ -638,14 +638,12 @@ def import_master_mesh():
                 bpy.ops.object.select_all(action='DESELECT')
                 continue
 
-            bpy.context.view_layer.objects.active = new_obj
+            # 2. FAST TRANSFORM APPLY: Bake the rotation directly into the mesh vertices 
+            # This replaces bpy.ops.object.transform_apply(rotation=True)
+            new_obj.data.transform(new_obj.rotation_euler.to_matrix().to_4x4())
+            new_obj.rotation_euler = (0, 0, 0) # Zero out the object's rotation
 
-            # Apply the 90-degree import rotation to the mesh so local X/Y/Z
-            # matches world, exactly as the legacy path does.
-            bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
-
-            # tile offsets are already EPSG:3857 - the scene CRS - so placement is
-            # the origin shift alone. No projection step.
+            # 3. Set location and scale directly
             new_obj.location = ((b['tile_offset_x'] - scene_ox) / scene_scale,
                                 (b['tile_offset_y'] - scene_oy) / scene_scale, 0.0)
             new_obj.scale = (1 / scene_scale, 1 / scene_scale, 1 / scene_scale)
@@ -659,7 +657,9 @@ def import_master_mesh():
                 new_obj.name = str(b['CA_Name']).replace(' ', '_')
 
             buildings.append(new_obj)
-            bpy.ops.object.select_all(action='DESELECT')
+            
+            # 4. FAST DESELECT: Replaces bpy.ops.object.select_all(action='DESELECT')
+            new_obj.select_set(False)
 
         if missing:
             print(f"  [!] {missing} manifest buildings had no OBJ on disk")
