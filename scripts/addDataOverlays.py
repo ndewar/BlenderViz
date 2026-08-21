@@ -17,6 +17,8 @@ import mathutils
 import bmesh
 import re
 
+import paths
+
 # --- Configuration ---
 state                = globals().get('state')
 county               = globals().get('county')
@@ -26,7 +28,7 @@ data_overlays_config = globals().get('data_overlays', {})
 color_ramp_config    = globals().get('color_ramp', {})
 flood_scenario       = globals().get('flood_scenario', None)
 
-default_properties_path = f"/Users/noahdewar/Documents/HighTide/data/{state}/projects/{project_name}/blender/site{site_num}/multipatch_properties_Site{site_num}.json"
+default_properties_path = f"{paths.siteDir(state, project_name, site_num)}/multipatch_properties_Site{site_num}.json"
 properties_path = data_overlays_config.get('properties_path', 'auto')
 if properties_path == 'auto':
     properties_path = default_properties_path
@@ -67,7 +69,7 @@ def robust_get_props(properties, obj):
 def load_properties(state: str = '', project_name: str = '', site_num: str = ''):
     if not os.path.exists(properties_path):
         print(f"  [!] Properties file not found: {properties_path}")
-        fallback_properties_path = f"/Users/noahdewar/Documents/HighTide/data/{state}/projects/{project_name}/blender/site{site_num}/multipatch_properties_Site{site_num}.json"
+        fallback_properties_path = f"{paths.siteDir(state, project_name, site_num)}/multipatch_properties_Site{site_num}.json"
         if not os.path.exists(fallback_properties_path):
             print(f"  [!] Properties file not found: {fallback_properties_path}")
             return {}

@@ -1,10 +1,14 @@
 import bpy
 import os
 
+import paths
+
 # ==========================================
 # --- CONFIGURATION ---
 # ==========================================
 # Grab configurations from globals
+state = globals().get('state', 'florida')
+project_name = globals().get('project_name')
 flyover_config = globals().get('flyover_config', {})
 is_animation = flyover_config.get("enabled", False)
 
@@ -18,11 +22,12 @@ FOG_COLOR = (0.6, 0.7, 0.8, 1.0)
 
 # --- DEBUG SETTINGS ---
 DEBUG_ENABLED = False
-DEBUG_DIR = "/Users/noahdewar/Documents/HighTide/debug_renders/"
+DEBUG_DIR = f"{paths.DEBUG_RENDERS}/"
 
 # --- FILE PATHS ---
-LOGO_PATH = bpy.path.abspath("/Users/noahdewar/Documents/HighTide/Powered-by-HighTide.png")
-LEGEND_PATH = bpy.path.abspath("/Users/noahdewar/Documents/HighTide/BlenderViz/blender_flood_depth_legend.png")
+LOGO_PATH = bpy.path.abspath(str(paths.WATERMARK))
+# written by prepDataForBlender.runPrep -- keep the two in sync
+LEGEND_PATH = bpy.path.abspath(str(paths.legendPath(state, project_name)))
 
 def setup_compositing_nodes(is_animation_enabled, show_legend):
     bpy.context.scene.use_nodes = True

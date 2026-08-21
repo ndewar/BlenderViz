@@ -1,6 +1,8 @@
 import bpy
 import os
 
+import paths
+
 # 1. Variables (Passed from Master Runner)
 state = globals().get('state')
 county = globals().get('county')
@@ -11,7 +13,7 @@ if not state or county or project_name or siteNum:
 
 # 2. Path to your Shapefile
 # Update this path to where your shapefiles are stored
-shp_path = f"/Users/noahdewar/Documents/HighTide/data/{state}/projects/{project_name}/blender/site{siteNum}/finalBuildings_Site{siteNum}_3857.shp"
+shp_path = f"{paths.siteDir(state, project_name, siteNum)}/finalBuildings_Site{siteNum}_3857.shp"
 
 def import_and_extrude_shp(filepath):
     if not os.path.exists(filepath):

@@ -5,7 +5,9 @@ import subprocess
 import sys
 
 # --- Import Shared Logic ---
-script_dir = "/Users/noahdewar/Documents/HighTide/BlenderViz/scripts/"
+# masterRunner puts scripts/ on sys.path before exec'ing this
+import paths
+script_dir = f"{paths.SCRIPTS_DIR}/"
 if script_dir not in sys.path:
     sys.path.append(script_dir)
 import render_utils
@@ -27,8 +29,12 @@ existing_object_names = set(bpy.data.objects.keys())
 flood_rasters = [name for name in existing_object_names if 'floodmap' in name.lower()]
 collection_names = ['noFlood'] + flood_rasters
 
-camera_names = ["Camera1", "Camera2"] 
-output_directory = f"/Users/noahdewar/Documents/HighTide/data/{state}/projects/{project_name}/blender/renders/v{version_num}/site{site_num}/"
+# masterRunner names one camera per google_url* key, so the count varies by site
+camera_names = sorted(
+    (o.name for o in bpy.data.objects if o.type == 'CAMERA' and re.fullmatch(r'Camera\d+', o.name)),
+    key=lambda n: int(n[len('Camera'):]),
+)
+output_directory = f"{paths.renderDir(state, project_name, site_num, version_num)}/"
 image_format = 'PNG'
 
 def setup_render_settings():

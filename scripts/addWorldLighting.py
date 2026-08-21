@@ -2,6 +2,8 @@ import bpy
 import os
 import math
 
+import paths
+
 # ==========================================
 # --- CONFIGURATION ---
 # ==========================================
@@ -44,7 +46,7 @@ node_world_output = nodes.new(type='ShaderNodeOutputWorld')
 node_world_output.location = (400, 300)
 
 # Load the EXR Image
-img_path = f"/Users/noahdewar/Documents/HighTide/BlenderViz/{exrFile}"
+img_path = f"{paths.BLENDERVIZ_ROOT / exrFile}"
 if os.path.exists(img_path):
     img = bpy.data.images.load(img_path)
     node_env.image = img

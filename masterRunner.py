@@ -10,6 +10,10 @@ import json
 import mathutils
 from mathutils import Vector
 
+# scripts/ holds paths.py and the pipeline scripts; Blender does not add it
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scripts'))
+import paths
+
 # 1. Define the possible folder names
 candidate_names = ["BlenderGIS", "BlenderGIS-master", "blendergis", "blendergis-master"]
 ADDON = None
@@ -37,21 +41,34 @@ georef = BlenderGIS.core.georaster.georef
 
 def camera_from_google_maps_url_lookat(url, camera_name="GoogleMapsCamera", dem_object_name=None, camera_height_offset=0.0):
     # [Unchanged: Keep your exact implementation here]
-    coord_match = re.search(r'@([-\d.]+),([-\d.]+),', url)
-    if not coord_match:
+    # google drops a token when it sits at its default, so a north facing camera
+    # comes back as '@lat,long,498a,35y,45t' with no 'h' at all. Read the tokens
+    # by their suffix letter rather than by position.
+    # Mirrors parseGoogleMapsUrl in HighTideEngine/src/utilities/camera.py --
+    # Blender's python cannot import it, so the two must be kept in step.
+    at_match = re.search(r'@(-?[\d.]+),(-?[\d.]+),([^/?]+)', url)
+    if not at_match:
         raise ValueError(f"Could not extract coordinates from URL: {url}")
-    
-    lat = float(coord_match.group(1))
-    lon = float(coord_match.group(2))
-    
-    param_match = re.search(r'([\d.]+)a,([\d.]+)y,([\d.]+)h,([\d.]+)t', url)
-    if not param_match:
+
+    lat = float(at_match.group(1))
+    lon = float(at_match.group(2))
+
+    fields = {'a': None, 'y': 35.0, 'h': 0.0, 't': 0.0}
+    for token in at_match.group(3).split(','):
+        token = token.strip()
+        if token and token[-1] in fields:
+            try:
+                fields[token[-1]] = float(token[:-1])
+            except ValueError:
+                pass
+
+    if fields['a'] is None:
         raise ValueError(f"Could not extract camera parameters from URL: {url}")
-    
-    distance = float(param_match.group(1))  
-    yaw = float(param_match.group(2))       
-    heading = float(param_match.group(3))   
-    tilt = float(param_match.group(4))      
+
+    distance = fields['a']
+    yaw = fields['y']
+    heading = fields['h']
+    tilt = fields['t']
 
     scn = bpy.context.scene
     geoscn = BlenderGIS.geoscene.GeoScene(scn)
@@ -169,7 +186,7 @@ def set_viewport_clipping():
                     space.clip_end = 1000000
 
 def get_existing_flood_rasters(state, project_name, site_num, restrict_import):
-    folder_path = f'/Users/noahdewar/Documents/HighTide/data/{state}/projects/{project_name}/blender/site{site_num}/'
+    folder_path = f'{paths.siteDir(state, project_name, site_num)}/'
     existing_objects = set(bpy.data.objects.keys())
     present, missing = set(), set()
 
@@ -207,8 +224,8 @@ def build_shared_context(state, county, site_num, site_config, is_existing):
     """Constructs the unified dictionary passed to external scripts."""
     flyover_config = site_config.get('flyover', {})
     return {
-        #'font_path': '/Users/noahdewar/Documents/HighTide/platform/src/assets/fonts/newOrder/NewOrder-Bold.ttf',
-        'font_path': '/System/Library/Fonts/Helvetica.ttc',
+        'font_path': paths.FONT_PATH,
+        'progress_file': site_config.get('progress_file'),
         'site_name': site_config.get('site_name', f'Site {site_num}'),
         'project_name': site_config['project_name'],
         'bpy': bpy,
@@ -236,8 +253,8 @@ def build_shared_context(state, county, site_num, site_config, is_existing):
 
 def process_single_site(state, county, site_num, project_name, site_config, is_existing):
     """The unified core logic for building or updating a site."""
-    script_dir = "/Users/noahdewar/Documents/HighTide/BlenderViz/scripts/"
-    blend_dir = f"/Users/noahdewar/Documents/HighTide/data/{state}/projects/{project_name}/blender/site{site_num}/"
+    script_dir = f"{paths.SCRIPTS_DIR}/"
+    blend_dir = f"{paths.siteDir(state, project_name, site_num)}/"
     blend_path = os.path.join(blend_dir, f"{county}_site{site_num}.blend")
 
     # 1. Setup Scene (Load or Clean)
@@ -302,6 +319,9 @@ def process_single_site(state, county, site_num, project_name, site_config, is_e
     set_viewport_clipping()
 
     # 6. Setup Cameras (must happen before data overlays for label tracking)
+    # must match cameraHeightOffset in prepDataForBlender.cameraGroundFootprint,
+    # or the ground footprint stops matching what is rendered
+    camera_height_offset = site_config.get('camera_height_offset', 50.0)
     cameraIDX = 1
     for key, url in site_config.items():
         if 'google_url' in key:
@@ -309,7 +329,7 @@ def process_single_site(state, county, site_num, project_name, site_config, is_e
             if is_existing and cam_name in bpy.data.objects:
                 print(f"Camera {cam_name} already exists — skipping")
             else:
-                camera_from_google_maps_url_lookat(url, cam_name, camera_height_offset=50.0)
+                camera_from_google_maps_url_lookat(url, cam_name, camera_height_offset=camera_height_offset)
             cameraIDX += 1
 
     # 7. Apply data overlays (flood colors, asset rings, labels) - after cameras are set up
@@ -337,6 +357,12 @@ def run_pipeline_dispatcher():
     CLI usage:
       New pipeline:      blender -b -P run_pipeline.py -- florida brevard 1 MyProject
       Existing pipeline: blender -b -P run_pipeline.py -- florida brevard 1 MyProject --existing
+
+    Optional flags:
+      --config <path>          run against a specific blender_config.json rather
+                               than the project's, so a job can use its own copy
+      --progress-file <path>   jsonl file the render scripts append per-frame
+                               events to, tailed by the worker
     """
     startTime = time.time()
     try:
@@ -346,12 +372,14 @@ def run_pipeline_dispatcher():
         site_num_val = args[2]
         project_name = args[3]
         is_existing = '--existing' in args
+        config_override = args[args.index('--config') + 1] if '--config' in args else None
+        progress_file = args[args.index('--progress-file') + 1] if '--progress-file' in args else None
     except (IndexError, ValueError):
         print("Error: Provide state, county, site, project. Optionally add --existing")
         return
 
     # Load JSON Config once for all sites
-    json_path = f"/Users/noahdewar/Documents/HighTide/HighTideEngine/data/projects/{project_name}/blender_config.json"
+    json_path = config_override or f"{paths.ENGINE_ROOT}/data/projects/{project_name}/blender_config.json"
     with open(json_path, 'r') as f:
         data = json.load(f)
 
@@ -372,6 +400,7 @@ def run_pipeline_dispatcher():
     top_level_data_overlays = data.get('data_overlays', {})
     top_level_color_ramp = data.get('color_ramp', {})
     top_level_flood_maps_to_run = data.get('flood_maps_to_run', {})
+    top_level_camera_height_offset = data.get('camera_height_offset', 50.0)
 
     for site_num, county in zip(sitesToRun,counties):
         print(f"\n\n{'='*40}\nProcessing Site {site_num}\n{'='*40}")
@@ -381,6 +410,8 @@ def run_pipeline_dispatcher():
         site_config['data_overlays'] = top_level_data_overlays
         site_config['color_ramp'] = top_level_color_ramp
         site_config['flood_maps_to_run'] = top_level_flood_maps_to_run
+        site_config.setdefault('camera_height_offset', top_level_camera_height_offset)
+        site_config['progress_file'] = progress_file
         site_config['project_name'] = project_name
 
         process_single_site(state, county, site_num, project_name, site_config, is_existing)

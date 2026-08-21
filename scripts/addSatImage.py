@@ -4,13 +4,18 @@ import math
 import mathutils
 import bmesh
 
+import paths
+
 # --- SETTINGS (Handled by Master Runner) ---
 material_name = "SatelliteOverlay"
+state = globals().get('state', 'florida')
+project_name = globals().get('project_name')
 county = globals().get('county', 'brevard')
 siteNum = globals().get('siteNum', 1)
 zoom = globals().get('sat_image_zoom', 18)
 
-image_path = f"/Users/noahdewar/Documents/HighTide/BlenderViz/mapbox/{county}Site{siteNum}_satimage_{zoom}.png"
+# written by prepDataForBlender.mergeMapboxTiles -- keep the two in sync
+image_path = f"{paths.satImage(state, project_name, county, siteNum, zoom)}"
 uv_map_name = "UVMap"
 
 # Find the DEM object by name (better than 'active_object' in headless)

@@ -2,6 +2,8 @@ import bpy
 from mathutils import Matrix
 import os
 
+import paths
+
 # Generate a UV map from the mesh's XY world extent
 def project_uv_from_bounds(obj, uv_map_name="depth_uv", flip_v=False):
     import numpy as np
@@ -243,7 +245,7 @@ siteNum = globals().get('siteNum', 1)
 flood_raster_depth_enabled = data_overlays.get('flood_raster_depth_coloring', {}).get('enabled', False)
 
 # Build folder path for depth textures
-folder_path = f"/Users/noahdewar/Documents/HighTide/data/{state}/projects/{project_name}/blender/site{siteNum}/"
+folder_path = f"{paths.siteDir(state, project_name, siteNum)}/"
 
 print("\n--- Starting Water Material Setup ---")
 print(f"  Flood raster depth coloring: {'enabled' if flood_raster_depth_enabled else 'disabled'}")

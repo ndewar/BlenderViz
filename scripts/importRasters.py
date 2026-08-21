@@ -2,6 +2,8 @@ import bpy
 import os
 from mathutils import Matrix
 
+import paths
+
 # --- Variables ---
 county = globals().get('county', 'brevard')
 siteNum = globals().get('siteNum', 1)
@@ -77,7 +79,7 @@ def apply_decimation(obj, ratio, mesh_type="mesh"):
     print(f"  Decimated {mesh_type}: {original_verts:,} → {new_verts:,} vertices ({reduction:.1f}% reduction)")
 
 # --- Main Execution ---
-folder_path = f'/Users/noahdewar/Documents/HighTide/data/{state}/projects/{project_name}/blender/site{siteNum}/'
+folder_path = f'{paths.siteDir(state, project_name, siteNum)}/'
 existing_object_names = set(bpy.data.objects.keys())
 
 if os.path.exists(folder_path):

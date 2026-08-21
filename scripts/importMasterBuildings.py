@@ -22,6 +22,8 @@ import subprocess
 import platform
 import ast
 from pathlib import Path
+
+import paths
 import re
 
 # --- Try to dynamically find and load BlenderGIS ---
@@ -56,10 +58,17 @@ site_num = globals().get('siteNum', 1)
 project_name = globals().get('project_name')
 
 # Paths
-base_path = f"/Users/noahdewar/Documents/HighTide/data/{state}/projects/{project_name}/blender/site{site_num}"
+base_path = f"{paths.siteDir(state, project_name, site_num)}"
 obj_path = globals().get('building_obj_path', f"{base_path}/buildings_3d_blender.obj")
 geojson_path = globals().get('enriched_geojson_path', f"{base_path}/buildings_enriched_Site{site_num}.geojson")
 clip_shapefile_path = f"{base_path}/clipGeom_3857.shp"
+
+# Written by HighTideEngine prepDataForBlender when the extracted building tree
+# carries a buildings_index.gpkg. It names exactly which buildings belong in this
+# site and where each one sits, so every geospatial question - which buildings are
+# in the extent, where do they go, what are their flood depths - is already
+# answered and this script does none of it.
+manifest_path = Path(base_path) / f"buildingManifest_Site{site_num}.json"
 
 print(obj_path)
 print(geojson_path)
@@ -159,9 +168,7 @@ def batch_project_survivors(survivors, source_epsg=3857):
     """
     print(f"  [CRS] Batch projecting {len(survivors)} buildings via Conda Python (source EPSG:{source_epsg})...")
 
-    hostname = platform.node().lower()
-    env_name = "surf_v2" if "studio" in hostname else "surf_v1"
-    python_bin = f"/Users/noahdewar/miniconda3/envs/{env_name}/bin/python"
+    python_bin, _ogr, geo_env = paths.geoToolchain()
 
     script = f"""
 from pyproj import Transformer
@@ -186,14 +193,13 @@ for bid, x, y in {[(b['id'], b['x'], b['y']) for b in survivors]}:
 print(results)
 """
     try:
-        custom_env = os.environ.copy()
-        custom_env["PROJ_LIB"] = f"/Users/noahdewar/miniconda3/envs/{env_name}/share/proj"
+        custom_env = geo_env
 
         # THE FIX: Run python without '-c', and pipe the script directly into standard input
         result = subprocess.run(
-            [python_bin], 
-            input=script, 
-            env=custom_env, 
+            [python_bin],
+            input=script,
+            env=custom_env,
             capture_output=True, 
             text=True
         )
@@ -224,21 +230,9 @@ def reproject_shapefile_ogr(shp_path, target_epsg=3857):
         
     print(f"    [OGR] Reprojecting shapefile to EPSG:{target_epsg}...")
     
-    # 1. Detect the machine and set the environment name
-    hostname = platform.node().lower()
-    if "studio" in hostname:
-        env_name = "surf_v2"
-        print("    [OGR] Detected Mac Studio. Using env: surf_v2")
-    else:
-        env_name = "surf_v1"
-        print(f"    [OGR] Detected {platform.node()}. Using env: surf_v1")
-    
-    # 2. Build the dynamic paths
-    ogr_path = f"/Users/noahdewar/miniconda3/envs/{env_name}/bin/ogr2ogr"
-    
-    custom_env = os.environ.copy()
-    custom_env["PROJ_LIB"] = f"/Users/noahdewar/miniconda3/envs/{env_name}/share/proj"
-    custom_env["GDAL_DATA"] = f"/Users/noahdewar/miniconda3/envs/{env_name}/share/gdal"
+    # 1. Resolve the GDAL toolchain and its projection data
+    _python, ogr_path, custom_env = paths.geoToolchain()
+    print(f"    [OGR] Using {ogr_path}")
 
     # 3. Execute ogr2ogr
     try:
@@ -599,8 +593,89 @@ def import_master_mesh():
     # ==========================================
     # BRANCH A: JIT DIRECTORY IMPORT
     # ==========================================
-    if 1 == 1: #if os.path.isdir(obj_path):
-        print("  [!] Directory detected. Switching to Just-In-Time (JIT) batch import...")
+    if manifest_path.exists():
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+
+        rows = manifest.get('buildings', [])
+        # obj_path (building_obj_path from the site config) is the authority for
+        # where the tree lives: manifest['objRoot'] was recorded by whichever
+        # machine ran prep and need not resolve here.
+        obj_root = Path(obj_path)
+        recorded_root = manifest.get('objRoot')
+        if recorded_root and Path(recorded_root) != obj_root:
+            print(f"  [!] manifest objRoot {recorded_root} != building_obj_path {obj_root}; "
+                  f"using building_obj_path")
+
+        print(f"  Manifest import: {len(rows)} buildings, already clipped by prep")
+
+        # the layout convention lives in the manifest, so it is stated once by
+        # whoever wrote the tree rather than restated here
+        obj_pattern = manifest.get('objPattern',
+                                   '{building_dir}/building_{building_id}_optimized.obj')
+
+        missing = 0
+        for b in rows:
+            b_path = obj_root / obj_pattern.format(**b)
+            if not b_path.exists():
+                missing += 1
+                continue
+
+            try:
+                bpy.ops.wm.obj_import(filepath=str(b_path), forward_axis='NEGATIVE_Z', up_axis='Y')
+            except AttributeError:
+                bpy.ops.import_scene.obj(filepath=str(b_path), axis_forward='-Z', axis_up='Y')
+
+            sel = bpy.context.selected_objects
+            if not sel:
+                print(f"  [!] No geometry imported from {b_path.name} - skipping")
+                continue
+
+            new_obj = sel[0]
+            if new_obj.type == 'MESH' and len(new_obj.data.vertices) == 0:
+                print(f"  [!] {b_path.name} has 0 verts - skipping")
+                bpy.data.objects.remove(new_obj, do_unlink=True)
+                bpy.ops.object.select_all(action='DESELECT')
+                continue
+
+            bpy.context.view_layer.objects.active = new_obj
+
+            # Apply the 90-degree import rotation to the mesh so local X/Y/Z
+            # matches world, exactly as the legacy path does.
+            bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
+
+            # tile offsets are already EPSG:3857 - the scene CRS - so placement is
+            # the origin shift alone. No projection step.
+            new_obj.location = ((b['tile_offset_x'] - scene_ox) / scene_scale,
+                                (b['tile_offset_y'] - scene_oy) / scene_scale, 0.0)
+            new_obj.scale = (1 / scene_scale, 1 / scene_scale, 1 / scene_scale)
+
+            # what spatial_join_properties used to derive by point-in-polygon
+            for key, value in b.items():
+                if key in ('building_id', 'building_dir') or value is None:
+                    continue
+                new_obj[key] = value
+            if b.get('CA_Name'):
+                new_obj.name = str(b['CA_Name']).replace(' ', '_')
+
+            buildings.append(new_obj)
+            bpy.ops.object.select_all(action='DESELECT')
+
+        if missing:
+            print(f"  [!] {missing} manifest buildings had no OBJ on disk")
+        print(f"  Imported {len(buildings)} buildings from manifest")
+
+        for obj in buildings:
+            obj.select_set(True)
+        if buildings:
+            bpy.context.view_layer.objects.active = buildings[0]
+            bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+
+    # ==========================================
+    # BRANCH A (legacy): scan the tree and clip here
+    # ==========================================
+    elif os.path.isdir(obj_path):
+        print("  [!] No manifest. Falling back to Just-In-Time (JIT) batch import...")
         
         rings = load_clip_polygon_rings(clip_shapefile_path)
         if not rings:
@@ -840,7 +915,12 @@ def import_master_mesh():
             else:
                 obj.data.materials[0] = material
 
-    spatial_join_properties(buildings, geojson_path) #, footprint_rings=footprint_rings)
+    # the manifest already carries every property this would derive, and every
+    # building it lists is in the extent by construction - the join also DELETED
+    # anything it could not match, which is why a legacy run reports buildings
+    # removed that the manifest path keeps
+    if not manifest_path.exists():
+        spatial_join_properties(buildings, geojson_path) #, footprint_rings=footprint_rings)
 
     print("--- Master Building Import Complete ---\n")
 

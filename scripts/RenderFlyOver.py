@@ -6,7 +6,9 @@ import sys
 from mathutils import Vector
 
 # --- Import Shared Logic ---
-script_dir = "/Users/noahdewar/Documents/HighTide/BlenderViz/scripts/"
+# masterRunner puts scripts/ on sys.path before exec'ing this
+import paths
+script_dir = f"{paths.SCRIPTS_DIR}/"
 if script_dir not in sys.path:
     sys.path.append(script_dir)
 import render_utils
@@ -39,9 +41,7 @@ FLYOVER_FRAMES   = flyover_config.get('frames', 60)
 HOLD_FRAMES      = flyover_config.get('hold_frames', 12)
 FRAMES_PER_SEC   = flyover_config.get('fps', 24)
 print(globals())
-output_directory = os.path.join(
-    f"/Users/noahdewar/Documents/HighTide/data/{state}/projects/{project_name}/blender/renders/v{version_num}/site{site_num}/flyover/"
-)
+output_directory = f"{paths.renderDir(state, project_name, site_num, version_num)}/flyover/"
 
 def ease_in_out(t):
     # Gentle quadratic ease-in-out (smoothstep)
