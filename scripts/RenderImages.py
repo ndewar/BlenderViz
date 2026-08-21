@@ -98,7 +98,9 @@ filenames = []
 mp_properties = {}
 if globals().get('data_overlays', {}).get('enabled', False):
     import addDataOverlays
-    mp_properties = addDataOverlays.load_properties()
+    # pass the context explicitly: this module was IMPORTED, so its module-level
+    # properties_path is None and only these arguments can find the file
+    mp_properties = addDataOverlays.load_properties(state, project_name, site_num)
     # Map GlobalIDs for flexible lookup (same as main execution)
     for key in list(mp_properties.keys()):
         guid = mp_properties[key].get('GlobalID', '')

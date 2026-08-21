@@ -28,7 +28,18 @@ data_overlays_config = globals().get('data_overlays', {})
 color_ramp_config    = globals().get('color_ramp', {})
 flood_scenario       = globals().get('flood_scenario', None)
 
-default_properties_path = f"{paths.siteDir(state, project_name, site_num)}/multipatch_properties_Site{site_num}.json"
+# This module is used TWO ways and they have different contracts:
+#   * masterRunner exec()s it with the pipeline's context injected as globals, so
+#     `state`, `project_name` and `siteNum` are present and main() should run.
+#   * RenderImages.py imports it to reuse apply_building_flood_colors and friends.
+#     A plain import has no injected globals, so every name above is None.
+# Nothing at module level may therefore assume the context exists, or an import
+# builds paths out of None and raises before RenderImages has done anything.
+HAS_PIPELINE_CONTEXT = state is not None and project_name is not None
+
+default_properties_path = (
+    f"{paths.siteDir(state, project_name, site_num)}/multipatch_properties_Site{site_num}.json"
+    if HAS_PIPELINE_CONTEXT else None)
 properties_path = data_overlays_config.get('properties_path', 'auto')
 if properties_path == 'auto':
     properties_path = default_properties_path
@@ -67,8 +78,13 @@ def robust_get_props(properties, obj):
     return props
 
 def load_properties(state: str = '', project_name: str = '', site_num: str = ''):
-    if not os.path.exists(properties_path):
+    # properties_path is None when this module was imported rather than exec'd,
+    # so the caller's arguments are the only route to a path in that case
+    if not properties_path or not os.path.exists(properties_path):
         print(f"  [!] Properties file not found: {properties_path}")
+        if not (state and project_name):
+            print("  [!] No site context to fall back on; no legacy properties loaded")
+            return {}
         fallback_properties_path = f"{paths.siteDir(state, project_name, site_num)}/multipatch_properties_Site{site_num}.json"
         if not os.path.exists(fallback_properties_path):
             print(f"  [!] Properties file not found: {fallback_properties_path}")
@@ -972,8 +988,9 @@ def main():
 
     print("--- Data Overlays Complete ---\n")
 
-# Run the protected scope
-main()
-
-# Optional: Clean up the main function itself from the context when done
-del main
+# Run the overlay pass only when the pipeline exec'd this with its context. On a
+# plain `import addDataOverlays` this module must define functions and do nothing
+# else -- otherwise the import re-runs the whole overlay pass against state=None.
+if HAS_PIPELINE_CONTEXT:
+    main()
+    del main

@@ -596,7 +596,16 @@ def import_merged_site_obj(merged_path, rows, scene_ox, scene_oy, scene_scale, a
     keep those mesh coordinates inside float32's useful range (see
     mergeBuildingObjs -- absolute 3857 coordinates put every building 0.1 m out).
     """
-    by_id = {str(r['building_id']): r for r in rows}
+    # Blender truncates object names to 63 characters, so a longer building_id
+    # would come back shortened and match nothing -- the building would import
+    # fine and silently carry no flood depth or asset properties. Today's ids are
+    # 12 hex characters so this cannot fire, but the failure is quiet and the
+    # guard is one extra key.
+    by_id = {}
+    for r in rows:
+        key = str(r['building_id'])
+        by_id[key] = r
+        by_id.setdefault(key[:63], r)
 
     bpy.ops.object.select_all(action='DESELECT')
     try:
