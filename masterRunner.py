@@ -10,9 +10,6 @@ import json
 import mathutils
 from mathutils import Vector
 
-import functools
-print = functools.partial(print, flush=True)
-
 # scripts/ holds paths.py and the pipeline scripts; Blender does not add it
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scripts'))
 import paths
