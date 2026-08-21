@@ -686,91 +686,34 @@ def import_master_mesh():
             print(f"  [!] manifest objRoot {recorded_root} != building_obj_path {obj_root}; "
                   f"using building_obj_path")
 
-        print(f"  Manifest import: {len(rows)} buildings, already clipped by prep")
-
-        # the layout convention lives in the manifest, so it is stated once by
-        # whoever wrote the tree rather than restated here
-        obj_pattern = manifest.get('objPattern',
-                                   '{building_dir}/building_{building_id}_optimized.obj')
-
-        # ---- fast path: one placed OBJ for the whole site --------------------
         merged_name = manifest.get('mergedObj')
         merged_path = (Path(base_path) / merged_name) if merged_name else None
-        if merged_path and merged_path.exists():
-            buildings.extend(import_merged_site_obj(
-                merged_path, rows, scene_ox, scene_oy, scene_scale,
-                manifest.get('mergedAnchor') or (0.0, 0.0)))
-            print(f"  Imported {len(buildings)} buildings from the merged site OBJ")
+        if not (merged_path and merged_path.exists()):
+            # The one-at-a-time path this replaced was quadratic: bpy.ops.wm.obj_import
+            # re-evaluates the depsgraph against the scene it is filling, so 1200
+            # buildings took 99s one by one against 1.7s merged. It is not kept as a
+            # fallback, because falling back to it silently turns a five second import
+            # into a half hour one. Re-run prep to write the merged OBJ.
+            raise RuntimeError(
+                f"Manifest at {manifest_path} names no usable merged OBJ "
+                f"({merged_name or 'absent'}). It was written by an older prep; "
+                f"re-run prepDataForBlender for this site.")
+
+        t0 = time.time()
+        print(f"  Buildings: importing {len(rows)} from {merged_path.name} (single call)")
+        buildings = import_merged_site_obj(
+            merged_path, rows, scene_ox, scene_oy, scene_scale,
+            manifest.get('mergedAnchor') or (0.0, 0.0))
+
+        if buildings:
             for obj in buildings:
                 obj.select_set(True)
-            if buildings:
-                bpy.context.view_layer.objects.active = buildings[0]
-                bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-            return buildings
-
-        if merged_name:
-            print(f"  [!] manifest names {merged_name} but it is not at {merged_path}; "
-                  f"falling back to one import per building")
-
-        missing = 0
-        for b in rows:
-            startTime = time.time()
-            b_path = obj_root / obj_pattern.format(**b)
-            if not b_path.exists():
-                missing += 1
-                continue
-
-            try:
-                bpy.ops.wm.obj_import(filepath=str(b_path), forward_axis='NEGATIVE_Z', up_axis='Y')
-            except AttributeError:
-                bpy.ops.import_scene.obj(filepath=str(b_path), axis_forward='-Z', axis_up='Y')
-
-            sel = bpy.context.selected_objects
-            if not sel:
-                print(f"  [!] No geometry imported from {b_path.name} - skipping")
-                continue
-
-            new_obj = sel[0]
-            if new_obj.type == 'MESH' and len(new_obj.data.vertices) == 0:
-                print(f"  [!] {b_path.name} has 0 verts - skipping")
-                bpy.data.objects.remove(new_obj, do_unlink=True)
-                bpy.ops.object.select_all(action='DESELECT')
-                continue
-
-            # 2. FAST TRANSFORM APPLY: Bake the rotation directly into the mesh vertices 
-            # This replaces bpy.ops.object.transform_apply(rotation=True)
-            new_obj.data.transform(new_obj.rotation_euler.to_matrix().to_4x4())
-            new_obj.rotation_euler = (0, 0, 0) # Zero out the object's rotation
-
-            # 3. Set location and scale directly
-            new_obj.location = ((b['tile_offset_x'] - scene_ox) / scene_scale,
-                                (b['tile_offset_y'] - scene_oy) / scene_scale, 0.0)
-            new_obj.scale = (1 / scene_scale, 1 / scene_scale, 1 / scene_scale)
-
-            # what spatial_join_properties used to derive by point-in-polygon
-            for key, value in b.items():
-                if key in ('building_id', 'building_dir') or value is None:
-                    continue
-                new_obj[key] = value
-            if b.get('CA_Name'):
-                new_obj.name = str(b['CA_Name']).replace(' ', '_')
-
-            buildings.append(new_obj)
-
-            # 4. FAST DESELECT: Replaces bpy.ops.object.select_all(action='DESELECT')
-            new_obj.select_set(False)
-            elapsed_ms = (time.time() - startTime)
-            print(f"OBJ import of '{b_path.name}' took {elapsed_ms:.2f} seconds")
-
-        if missing:
-            print(f"  [!] {missing} manifest buildings had no OBJ on disk")
-        print(f"  Imported {len(buildings)} buildings from manifest")
-
-        for obj in buildings:
-            obj.select_set(True)
-        if buildings:
             bpy.context.view_layer.objects.active = buildings[0]
             bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+
+        print(f"  Buildings ready: {len(buildings)} imported in {time.time() - t0:.1f}s")
+        return buildings
+
 
     # ==========================================
     # BRANCH A (legacy): scan the tree and clip here
