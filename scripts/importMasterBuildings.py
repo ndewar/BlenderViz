@@ -22,7 +22,7 @@ import subprocess
 import platform
 import ast
 from pathlib import Path
-
+import time
 import paths
 import re
 
@@ -578,6 +578,76 @@ def spatial_join_properties(buildings, geojson_path, footprint_rings=None):
 
     print(f"  Spatial Join Complete: Matched {match_count} buildings. Deleted {removed_count} out-of-bounds buildings.")
     
+def import_merged_site_obj(merged_path, rows, scene_ox, scene_oy, scene_scale, anchor):
+    """Import the whole site's buildings in one operator call.
+
+    prepDataForBlender.mergeBuildingObjs writes one OBJ holding every building in
+    the site, each as its own `o <building_id>` group with its tile offset already
+    baked into the vertices. So this stays one OBJECT per building -- it is not a
+    join, and per-building properties, naming and flood colouring are unaffected.
+
+    Why it exists: bpy.ops.wm.obj_import re-evaluates the depsgraph against the
+    scene it is filling, so the per-call cost RISES as buildings accumulate and
+    importing one at a time is quadratic. Measured on Blender 4.5.7, ~130-vertex
+    buildings: 1200 buildings took 99s one at a time and 1.7s merged.
+
+    Placement is applied once, identically to every object: the per-building part
+    is already in the mesh, and what is left is the site anchor prep subtracted to
+    keep those mesh coordinates inside float32's useful range (see
+    mergeBuildingObjs -- absolute 3857 coordinates put every building 0.1 m out).
+    """
+    by_id = {str(r['building_id']): r for r in rows}
+
+    bpy.ops.object.select_all(action='DESELECT')
+    try:
+        bpy.ops.wm.obj_import(filepath=str(merged_path),
+                              forward_axis='NEGATIVE_Z', up_axis='Y')
+    except AttributeError:
+        bpy.ops.import_scene.obj(filepath=str(merged_path),
+                                 axis_forward='-Z', axis_up='Y')
+
+    imported = list(bpy.context.selected_objects)
+    print(f"  Merged import: {len(imported)} objects from {merged_path.name}")
+
+    origin = ((float(anchor[0]) - scene_ox) / scene_scale,
+              (float(anchor[1]) - scene_oy) / scene_scale, 0.0)
+    unmatched = 0
+    buildings = []
+
+    for obj in imported:
+        if obj.type != 'MESH' or len(obj.data.vertices) == 0:
+            bpy.data.objects.remove(obj, do_unlink=True)
+            continue
+
+        # bake the axis rotation into the mesh, as the per-building path does
+        obj.data.transform(obj.rotation_euler.to_matrix().to_4x4())
+        obj.rotation_euler = (0, 0, 0)
+        obj.location = origin
+        obj.scale = (1 / scene_scale, 1 / scene_scale, 1 / scene_scale)
+
+        # Blender names each object from its `o` line, which prep wrote as the
+        # building id. A duplicate name would arrive as 'id.001', so split it back
+        # off rather than silently failing to match.
+        row = by_id.get(obj.name) or by_id.get(obj.name.rsplit('.', 1)[0])
+        if row is None:
+            unmatched += 1
+        else:
+            for key, value in row.items():
+                if key in ('building_id', 'building_dir') or value is None:
+                    continue
+                obj[key] = value
+            if row.get('CA_Name'):
+                obj.name = str(row['CA_Name']).replace(' ', '_')
+
+        obj.select_set(False)
+        buildings.append(obj)
+
+    if unmatched:
+        print(f"  [!] {unmatched} imported objects matched no manifest row, so they "
+              f"carry no flood or asset properties")
+    return buildings
+
+
 def import_master_mesh():
     """Imports, projects, splits, and formats either a Master OBJ or a directory of JIT OBJs."""
     print("\n--- Importing Master Building Mesh(es) ---")
@@ -614,8 +684,28 @@ def import_master_mesh():
         obj_pattern = manifest.get('objPattern',
                                    '{building_dir}/building_{building_id}_optimized.obj')
 
+        # ---- fast path: one placed OBJ for the whole site --------------------
+        merged_name = manifest.get('mergedObj')
+        merged_path = (Path(base_path) / merged_name) if merged_name else None
+        if merged_path and merged_path.exists():
+            buildings.extend(import_merged_site_obj(
+                merged_path, rows, scene_ox, scene_oy, scene_scale,
+                manifest.get('mergedAnchor') or (0.0, 0.0)))
+            print(f"  Imported {len(buildings)} buildings from the merged site OBJ")
+            for obj in buildings:
+                obj.select_set(True)
+            if buildings:
+                bpy.context.view_layer.objects.active = buildings[0]
+                bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+            return buildings
+
+        if merged_name:
+            print(f"  [!] manifest names {merged_name} but it is not at {merged_path}; "
+                  f"falling back to one import per building")
+
         missing = 0
         for b in rows:
+            startTime = time.time()
             b_path = obj_root / obj_pattern.format(**b)
             if not b_path.exists():
                 missing += 1
@@ -657,9 +747,11 @@ def import_master_mesh():
                 new_obj.name = str(b['CA_Name']).replace(' ', '_')
 
             buildings.append(new_obj)
-            
+
             # 4. FAST DESELECT: Replaces bpy.ops.object.select_all(action='DESELECT')
             new_obj.select_set(False)
+            elapsed_ms = (time.time() - startTime)
+            print(f"OBJ import of '{b_path.name}' took {elapsed_ms:.2f} seconds")
 
         if missing:
             print(f"  [!] {missing} manifest buildings had no OBJ on disk")
