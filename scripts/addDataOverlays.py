@@ -185,6 +185,9 @@ def apply_building_flood_colors(properties, passed_config, color_ramp_config, sc
         and not obj.name.startswith("Card_")
     ]
     total_objs = len(target_objects)
+    
+    # Fetch the existing material from the Blender file
+    orig_mat = bpy.data.materials.get("MasterBuildingMaterial")     
 
     print(f"  Coloring Buildings ({scenario})...")
     for i, obj in enumerate(target_objects):
@@ -200,17 +203,20 @@ def apply_building_flood_colors(properties, passed_config, color_ramp_config, sc
             raw_depth = props.get(scenario)
             
         if raw_depth is None or raw_depth < 0.0001:
-            # If previously flooded, reset to white/default
+            # If previously flooded, reset to the original building material
             if obj.get('flood_depth', 0) > 0 or any(m.name.startswith("FloodDepth_") for m in obj.data.materials if m):
                 obj['flood_depth'] = 0.0
                 obj['scenario']    = scenario
                 
-                mat_name = "FloodDepth_None"
-                if mat_name not in material_cache:
-                    material_cache[mat_name] = create_flood_material(mat_name, (1.0, 1.0, 1.0, 1.0))
-                
                 obj.data.materials.clear()
-                obj.data.materials.append(material_cache[mat_name])
+                if orig_mat:
+                    obj.data.materials.append(orig_mat)
+                else:
+                    # Fallback just in case the material was accidentally deleted
+                    mat_name = "FloodDepth_None"
+                    if mat_name not in material_cache:
+                        material_cache[mat_name] = create_flood_material(mat_name, (0.6, 0.55, 0.5, 1.0))
+                    obj.data.materials.append(material_cache[mat_name])
             continue
 
         flood_depth = float(raw_depth or 0)
