@@ -142,10 +142,14 @@ def apply_caption(filepath, layer_name, version_num, site_name, site_num, camera
     img = Image.open(filepath).convert("RGBA")
     overlay = Image.new("RGBA", img.size, (255, 255, 255, 0))
     draw = ImageDraw.Draw(overlay)
-    
+
+    # Every size below was tuned against a 1920 wide frame. They are pixel values,
+    # so without this the captions render half size at 4K.
+    ui_scale = img.width / 1920.0
+
     # --- 1. Load Two Font Sizes ---
-    main_size = 22
-    small_size = 16
+    main_size = max(1, round(22 * ui_scale))
+    small_size = max(1, round(16 * ui_scale))
     
     if 'Helvetica' in font_path:
         font_main = ImageFont.truetype(font_path, size=main_size, index=1)
@@ -154,10 +158,10 @@ def apply_caption(filepath, layer_name, version_num, site_name, site_num, camera
         font_main = ImageFont.truetype(font_path, size=main_size)
         font_small = ImageFont.truetype(font_path, size=small_size)
     
-    padding = 8
-    margin_x = 10
-    margin_y = 10
-    line_spacing = 6
+    padding = max(1, round(8 * ui_scale))
+    margin_x = max(1, round(10 * ui_scale))
+    margin_y = max(1, round(10 * ui_scale))
+    line_spacing = max(1, round(6 * ui_scale))
 
     # --- 2. Top-Left Box (Line 1 & 2 - Stacked) ---
     bbox1 = draw.textbbox((0, 0), line1_text, font=font_main)

@@ -171,12 +171,65 @@ def safe_clean_scene():
         for item in block:
             block.remove(item)
 
-def apply_render_settings(scene):
+# Preference order for GPU rendering. compute_device_type is a dynamic enum whose
+# members depend on the build, and it cannot be introspected -- bl_rna reports an
+# empty list even on a machine where Metal plainly works -- so the only way to
+# find out what this Blender supports is to assign and catch the TypeError.
+GPU_BACKENDS = ('METAL', 'OPTIX', 'CUDA', 'HIP', 'ONEAPI')
+
+
+def enable_gpu_rendering(scene):
+    """Point Cycles at the GPU.
+
+    Blender defaults scene.cycles.device to CPU and nothing here ever set it, so
+    every render before this ran on CPU cores with the GPU idle. Setting the scene
+    is enough on a machine whose preferences happen to be configured, but those
+    are per-machine local state, so the backend and the device list are forced
+    here rather than assumed. In background mode none of these writes reach
+    userpref.blend, so this cannot disturb a desktop Blender's settings.
+    """
+    prefs = bpy.context.preferences.addons['cycles'].preferences
+
+    for backend in GPU_BACKENDS:
+        try:
+            prefs.compute_device_type = backend
+            break
+        except TypeError:
+            continue
+    else:
+        print("  [!] No GPU backend in this Blender build - Cycles stays on CPU")
+        return
+
+    prefs.get_devices()
+    # Hybrid CPU+GPU is a net loss on Apple silicon: the CPU tiles finish last
+    # and the GPU ends up waiting on them.
+    enabled = []
+    for device in prefs.devices:
+        device.use = device.type != 'CPU'
+        if device.use:
+            enabled.append(f"{device.name} ({device.type})")
+
+    if not enabled:
+        # Saying GPU while silently rendering on CPU is how this went unnoticed
+        # in the first place.
+        print(f"  [!] compute_device_type={prefs.compute_device_type} but no GPU "
+              f"devices found - Cycles stays on CPU")
+        return
+
+    scene.cycles.device = 'GPU'
+    print(f"  Cycles rendering on GPU: {', '.join(enabled)}")
+
+
+def apply_render_settings(scene, resolution):
     scene.render.engine = 'CYCLES'
+    scene.render.resolution_x = int(resolution[0])
+    scene.render.resolution_y = int(resolution[1])
+    scene.render.resolution_percentage = 100
     scene.cycles.samples = 124
     scene.cycles.use_adaptive_sampling = True
     scene.cycles.adaptive_threshold = 0.01 
     scene.cycles.preview_samples = 32
+    enable_gpu_rendering(scene)
 
 def set_viewport_clipping():
     for area in bpy.context.screen.areas:
@@ -246,6 +299,7 @@ def build_shared_context(state, county, site_num, site_config, is_existing):
         'color_ramp': site_config.get('color_ramp', {}),  # Shared color ramp for depth visualization
         'data_overlays': site_config.get('data_overlays', {}),  # Data overlay settings
         'flood_maps_to_run': site_config.get('flood_maps_to_run', {}),
+        'render_resolution': site_config.get('render_resolution', [1920, 1080]),
         'update_flag': not is_existing,
         "building_obj_path": site_config.get('building_obj_path', ''),
         'flyover_config': flyover_config
@@ -274,7 +328,14 @@ def process_single_site(state, county, site_num, project_name, site_config, is_e
     # 3. Create Context
     shared_context = build_shared_context(state, county, site_num, site_config, is_existing)
 
-    # 4. Import Geometry & Materials (The Divergent Step)
+    # 4. Global Render Settings
+    # Ahead of the scripts, not after them: setUpCompositing.py reads
+    # render.resolution_x/y to size and place the legend and the watermark, so it
+    # has to see the resolution this site will actually render at.
+    scene = bpy.context.scene
+    apply_render_settings(scene, shared_context['render_resolution'])
+
+    # 5. Import Geometry & Materials (The Divergent Step)
     if is_existing:
         present, missing = get_existing_flood_rasters(state, project_name, site_num, shared_context['restrict_import'])
         print(f"Rasters already in scene: {present}\nRasters to import: {missing}")
@@ -307,10 +368,6 @@ def process_single_site(state, county, site_num, project_name, site_config, is_e
                 'multipatch_offset_z': site_config.get('multipatch_offset_z', 0.0)
             })
             run_external_script(script_dir, "importMultipatch.py", shared_context)
-
-    # 5. Global Render Settings
-    scene = bpy.context.scene
-    apply_render_settings(scene)
 
     flyover_config = site_config.get('flyover', {})
     if flyover_config.get('enabled', False):
@@ -401,6 +458,7 @@ def run_pipeline_dispatcher():
     top_level_color_ramp = data.get('color_ramp', {})
     top_level_flood_maps_to_run = data.get('flood_maps_to_run', {})
     top_level_camera_height_offset = data.get('camera_height_offset', 50.0)
+    top_level_render_resolution = data.get('render_resolution', [1920, 1080])
 
     for site_num, county in zip(sitesToRun,counties):
         print(f"\n\n{'='*40}\nProcessing Site {site_num}\n{'='*40}")
@@ -411,6 +469,7 @@ def run_pipeline_dispatcher():
         site_config['color_ramp'] = top_level_color_ramp
         site_config['flood_maps_to_run'] = top_level_flood_maps_to_run
         site_config.setdefault('camera_height_offset', top_level_camera_height_offset)
+        site_config.setdefault('render_resolution', top_level_render_resolution)
         site_config['progress_file'] = progress_file
         site_config['project_name'] = project_name
 

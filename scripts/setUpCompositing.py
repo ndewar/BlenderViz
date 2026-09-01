@@ -81,11 +81,17 @@ def setup_compositing_nodes(is_animation_enabled, show_legend):
         tree.links.new(render_layers_node.outputs["Mist"], mist_mix_node.inputs[0])
         current_image_output = mist_mix_node.outputs["Image"]
 
-    # Grab render resolution for mathematical placement
+    # Grab render resolution for mathematical placement. masterRunner applies the
+    # render settings BEFORE this script runs, so these are the final numbers.
     render = bpy.context.scene.render
-    res_x = render.resolution_x * (render.resolution_percentage / 100)
-    res_y = render.resolution_y * (render.resolution_percentage / 100)
-    margin_x, margin_y = 30, 30
+    res_x = int(render.resolution_x * (render.resolution_percentage / 100))
+    res_y = int(render.resolution_y * (render.resolution_percentage / 100))
+
+    # Everything below is sized as a fraction of the frame rather than in fixed
+    # pixels, so the overlays keep their proportions at any resolution. The
+    # fractions are the values that were hardcoded for 1920x1080.
+    margin_x = margin_y = round(30 * res_x / 1920)
+    LOGO_WIDTH_FRAC = 0.1875   # 360px in a 1920 frame == the old 0.375 of a 960px logo
 
     # --- 2. ADD LEGEND (BOTTOM-LEFT) ---
     if show_legend:
@@ -96,32 +102,41 @@ def setup_compositing_nodes(is_animation_enabled, show_legend):
             legend_node = tree.nodes.new(type="CompositorNodeImage")
             legend_node.location = (-900, 0)
             legend_node.image = legend_img
-            
-            # Use 'RELATIVE' space to avoid default_value crash
-            scale_leg = tree.nodes.new(type="CompositorNodeScale")
-            scale_leg.location = (-600, 0)
-            scale_leg.space = 'RELATIVE'
-            scale_leg.inputs['X'].default_value = 0.25  # Adjust legend scale here
-            scale_leg.inputs['Y'].default_value = 0.25  
-
-            # Calculate bottom-left coordinates
-            leg_w, leg_h = legend_img.size[0] * 0.25, legend_img.size[1] * 0.25
-            trans_leg_x = -(res_x / 2) + (leg_w / 2) + margin_x
-            trans_leg_y = -(res_y / 2) + (leg_h / 2) + margin_y
-
-            trans_leg = tree.nodes.new(type="CompositorNodeTranslate")
-            trans_leg.location = (-300, 0)
-            trans_leg.inputs['X'].default_value = trans_leg_x
-            trans_leg.inputs['Y'].default_value = trans_leg_y
 
             alpha_over_leg = tree.nodes.new(type="CompositorNodeAlphaOver")
             alpha_over_leg.location = (0, 400)
-
-            # Link the legend into the chain
-            tree.links.new(legend_node.outputs["Image"], scale_leg.inputs["Image"])
-            tree.links.new(scale_leg.outputs["Image"], trans_leg.inputs["Image"])
             tree.links.new(current_image_output, alpha_over_leg.inputs[1])
-            tree.links.new(trans_leg.outputs["Image"], alpha_over_leg.inputs[2])
+
+            if tuple(legend_img.size) == (res_x, res_y):
+                # prepDataForBlender wrote a full frame legend: it is already the
+                # right size and already in the corner, so it goes straight in.
+                # No Scale node means nothing resamples it -- the Scale node
+                # minifies with a two-tap bilinear filter, which shreds the text.
+                print(f"  Legend is full frame ({res_x}x{res_y}), compositing 1:1")
+                tree.links.new(legend_node.outputs["Image"], alpha_over_leg.inputs[2])
+            else:
+                # A legend from an older prep run, or a resolution that changed
+                # after prep. Scale it so the frame is still correct, and say so:
+                # the placement is right but the text will be soft.
+                print(f"  [!] Legend is {tuple(legend_img.size)} but the render is "
+                      f"{res_x}x{res_y} - scaling it to fit. Re-run prep for a sharp "
+                      f"legend.")
+                leg_scale = (0.275 * res_x) / legend_img.size[0]
+                scale_leg = tree.nodes.new(type="CompositorNodeScale")
+                scale_leg.location = (-600, 0)
+                scale_leg.space = 'RELATIVE'
+                scale_leg.inputs['X'].default_value = leg_scale
+                scale_leg.inputs['Y'].default_value = leg_scale
+
+                leg_w, leg_h = legend_img.size[0] * leg_scale, legend_img.size[1] * leg_scale
+                trans_leg = tree.nodes.new(type="CompositorNodeTranslate")
+                trans_leg.location = (-300, 0)
+                trans_leg.inputs['X'].default_value = round(-(res_x / 2) + (leg_w / 2) + margin_x)
+                trans_leg.inputs['Y'].default_value = round(-(res_y / 2) + (leg_h / 2) + margin_y)
+
+                tree.links.new(legend_node.outputs["Image"], scale_leg.inputs["Image"])
+                tree.links.new(scale_leg.outputs["Image"], trans_leg.inputs["Image"])
+                tree.links.new(trans_leg.outputs["Image"], alpha_over_leg.inputs[2])
             
             # Update the chain to pass through the legend
             current_image_output = alpha_over_leg.outputs["Image"]
@@ -137,16 +152,22 @@ def setup_compositing_nodes(is_animation_enabled, show_legend):
         logo_node.location = (-900, -300)
         logo_node.image = logo_img
 
+        # Scale off the FRAME, not off the logo's own size. RELATIVE is relative to
+        # the source image, so the old fixed 0.375 pinned the watermark to 360px
+        # and it would have rendered half-size at 4K.
+        logo_scale = (LOGO_WIDTH_FRAC * res_x) / logo_img.size[0]
         scale_logo = tree.nodes.new(type="CompositorNodeScale")
         scale_logo.location = (-600, -300)
         scale_logo.space = 'RELATIVE'
-        scale_logo.inputs['X'].default_value = 0.375  
-        scale_logo.inputs['Y'].default_value = 0.375  
+        scale_logo.inputs['X'].default_value = logo_scale
+        scale_logo.inputs['Y'].default_value = logo_scale
 
-        # Calculate bottom-right coordinates
-        logo_w, logo_h = logo_img.size[0] * 0.375, logo_img.size[1] * 0.375
-        trans_logo_x = (res_x / 2) - (logo_w / 2) - margin_x
-        trans_logo_y = -(res_y / 2) + (logo_h / 2) + margin_y
+        # Calculate bottom-right coordinates. Rounded because a half pixel offset
+        # is snapped by the Translate node's NEAREST interpolation, which moves the
+        # watermark by an unpredictable whole pixel instead of half of one.
+        logo_w, logo_h = logo_img.size[0] * logo_scale, logo_img.size[1] * logo_scale
+        trans_logo_x = round((res_x / 2) - (logo_w / 2) - margin_x)
+        trans_logo_y = round(-(res_y / 2) + (logo_h / 2) + margin_y)
 
         trans_logo = tree.nodes.new(type="CompositorNodeTranslate")
         trans_logo.location = (-300, -300)
