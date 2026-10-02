@@ -42,6 +42,11 @@ def find_depth_token(collection_name: str) -> str | None:
             return part
     return None
 
+def scenario_caption(layer_name: str, depth_to_scenario: dict) -> str | None:
+    """The engine's caption for a raw flood layer name, or None when it sent none."""
+    entry = depth_to_scenario.get(find_depth_token(layer_name))
+    return entry.get('caption') if entry else None
+
 def process_scenario_name(collection_name: str, depth_to_year: None | dict = None) -> tuple[str,str]:
     if depth_to_year is None:
         depth_to_year = {}
@@ -122,22 +127,25 @@ def update_labels_for_camera(camera):
         track_constraint.track_axis = 'TRACK_Z' 
         track_constraint.up_axis = 'UP_Y'
 
-def get_caption_lines(layer_name, version_num, site_name, site_num, camera_name):
+def get_caption_lines(layer_name, version_num, site_name, site_num, camera_name, scenario_caption=None):
     """Formats the raw layer name into two clean caption lines."""
     caption_line_one = f"Site {site_num} - {site_name} - {camera_name.replace('Camera','Camera ')}"
     #print(layer_name)
-    caption_line_two = layer_name.replace('yr_',' Year, ').replace('noFlood_','').replace('saturated','Saturated Conditions,').replace('_',' ').split('site')[0].replace(' C1',' Category 1 Storm Surge').replace(' 3857','')
-    caption_line_two = caption_line_two.replace(' Category',' Sea Level Rise Projection + High Tide Flooding and Category')
+    if scenario_caption:
+        caption_line_two = scenario_caption
+    else:
+        caption_line_two = layer_name.replace('yr_',' Year, ').replace('noFlood_','').replace('saturated','Saturated Conditions,').replace('_',' ').split('site')[0].replace(' C1',' Category 1 Storm Surge').replace(' 3857','')
+        caption_line_two = caption_line_two.replace(' Category',' Sea Level Rise Projection + High Tide Flooding and Category')
     #print(caption_line_two)
     caption_line_three = f"{str(date.today())} - Version {version_num}"
 
     return caption_line_one, caption_line_two, caption_line_three
 
 
-def apply_caption(filepath, layer_name, version_num, site_name, site_num, camera_name, font_path):
+def apply_caption(filepath, layer_name, version_num, site_name, site_num, camera_name, font_path, scenario_caption=None):
     """Draws a stacked main caption top-left, and a smaller metadata caption bottom-left."""
 
-    line1_text, line2_text, line3_text = get_caption_lines(layer_name, version_num, site_name, site_num, camera_name)
+    line1_text, line2_text, line3_text = get_caption_lines(layer_name, version_num, site_name, site_num, camera_name, scenario_caption)
     
     img = Image.open(filepath).convert("RGBA")
     overlay = Image.new("RGBA", img.size, (255, 255, 255, 0))
@@ -203,7 +211,7 @@ def apply_caption(filepath, layer_name, version_num, site_name, site_num, camera
     combined.save(filepath)
 
 
-def batch_apply_captions(frame_paths, layer_name, version_num, site_name, site_num, camera_name, font_path):
+def batch_apply_captions(frame_paths, layer_name, version_num, site_name, site_num, camera_name, font_path, scenario_caption=None):
     """Takes a list of filepaths and applies captions in parallel."""
     if not HAS_PILLOW or not frame_paths:
         return
@@ -218,7 +226,8 @@ def batch_apply_captions(frame_paths, layer_name, version_num, site_name, site_n
         site_name=site_name,
         site_num=site_num,
         camera_name=camera_name,
-        font_path=font_path
+        font_path=font_path,
+        scenario_caption=scenario_caption
     )
     
     # ThreadPoolExecutor automatically uses the optimal number of threads for your CPU

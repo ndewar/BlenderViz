@@ -25,6 +25,7 @@ update_flag = globals().get('update_flag', True)
 data_overlays_config = globals().get('data_overlays', {})
 color_ramp_config = globals().get('color_ramp', {})
 depth_to_year = globals().get('flood_maps_to_run', {}).get('depth_to_year',{})
+depth_to_scenario = globals().get('flood_maps_to_run', {}).get('depth_to_scenario',{})
 existing_object_names = set(bpy.data.objects.keys())
 flood_rasters = [name for name in existing_object_names if 'floodmap' in name.lower()]
 collection_names = ['noFlood'] + flood_rasters
@@ -51,6 +52,7 @@ def render_and_save(collection_name, camera_name, update_flag=True):
     render_utils.update_labels_for_camera(camera)
 
     print(collection_name)
+    scenario_caption = render_utils.scenario_caption(collection_name, depth_to_scenario)
     collection_name, collection_name_only_scenario = render_utils.process_scenario_name(collection_name, depth_to_year)
     print(collection_name)
     bpy.context.scene.camera = camera
@@ -75,7 +77,7 @@ def render_and_save(collection_name, camera_name, update_flag=True):
     
     # --- Shared Caption Logic ---
     print(filepath, collection_name, version_num, site_name, site_num, camera_name)
-    render_utils.apply_caption(filepath, collection_name, version_num, site_name, site_num, camera_name, font_path)
+    render_utils.apply_caption(filepath, collection_name, version_num, site_name, site_num, camera_name, font_path, scenario_caption)
 
     return filepath
 

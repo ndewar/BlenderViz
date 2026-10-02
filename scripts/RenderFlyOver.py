@@ -25,6 +25,7 @@ project_name = globals().get('project_name')
 data_overlays_config = globals().get('data_overlays', {})
 color_ramp_config = globals().get('color_ramp', {})
 depth_to_year = globals().get('flood_maps_to_run', {}).get('depth_to_year',{})
+depth_to_scenario = globals().get('flood_maps_to_run', {}).get('depth_to_scenario',{})
 flyover_config = globals().get('flyover_config', {})
 clean_up_frames = flyover_config.get('clean_up_frames', False)
 
@@ -278,7 +279,8 @@ else:
         
         # Stamp them all in parallel
         existing_frames = [p for p in frame_paths if os.path.exists(p)]
-        render_utils.batch_apply_captions(existing_frames, fixed_layer_name, version_num, site_name, site_num, 'Flight Path 1', font_path)
+        scenario_caption = render_utils.scenario_caption(layer, depth_to_scenario)
+        render_utils.batch_apply_captions(existing_frames, fixed_layer_name, version_num, site_name, site_num, 'Flight Path 1', font_path, scenario_caption)
 
         # assemble the outputs
         assemble_outputs(frame_paths, gif_path, mp4_path)
